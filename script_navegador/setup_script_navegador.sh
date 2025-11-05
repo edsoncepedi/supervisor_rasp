@@ -8,13 +8,13 @@ dpkg --configure -a
 echo "=== Atualizando sistema ==="
 apt update && apt upgrade -y
 
-echo "=== Instalando dependências ==="
+echo "=== Instalando dependncias ==="
 apt install -y chromium xdotool wmctrl
 
 chmod +x $PWD/start-browser.sh
 
-# --- CRIA SERVIÇO SYSTEMD ---
-echo "=== Criando serviço systemd ==="
+# --- CRIA SERVIO SYSTEMD ---
+echo "=== Criando servico systemd ==="
 cat << EOF > /usr/lib/systemd/system/auto_nav.service
 [Unit]
 Description=Inicia o navegador automaticamente em modo kiosk
