@@ -1,5 +1,6 @@
 import RPi.GPIO as GPIO
 from mfrc522 import SimpleMFRC522
+import requests
 import paho.mqtt.client as mqtt
 import time
 
@@ -9,6 +10,10 @@ GPIO.setmode(GPIO.BCM)
 BROKER = "172.16.10.175"
 PORT = 1883
 TOPIC = "ControleProducao_DD"
+
+# --- CONFIGURAÇÕES DO FLASK ---
+URL = "http://172.16.10.175:7000/rfid__checkin_posto"  
+POSTO = "posto_1"
 
 # --- DEFINIÇÃO DOS PINOS ---
 TOMADA_POSTO = 17
@@ -77,16 +82,16 @@ def set_lamp_state(ativo):
         if ativo:
             # Liga a tomada (nível baixo no pino)
             GPIO.output(TOMADA_POSTO, GPIO.LOW)
-            print("Posto Liberado (Tomada LIGADA)")
+            print("Posto Liberado")
         else:
             # Desliga a tomada (nível alto no pino)
             GPIO.output(TOMADA_POSTO, GPIO.HIGH)
-            print("Posto Desligado (Tomada DESLIGADA)")
+            print("Posto Desligado")
 
         # Atualiza o estado armazenado
         is_output_active = ativo
 
-def verificar_cartao(leitor, cliente, topico):
+def verificar_cartao(leitor):
     """Verifica presença e remoção de cartões RFID."""
     global ultimo_id, ultimo_id_lido, ultimo_tempo_lido
 
@@ -99,13 +104,38 @@ def verificar_cartao(leitor, cliente, topico):
         if id_atual != ultimo_id:
             ultimo_id = id_atual
             print(f"Cartão detectado: {id_atual}")
-            cliente.publish(topico, f"{id_atual}")
+            verifica_id(id_atual)
 
     else:  # Nenhum cartão detectado
         if ultimo_id is not None and (time.time() - ultimo_tempo_lido > TEMPO_PERDA_CARTAO):
             print("Cartão removido.")
-            cliente.publish(topico, "REMOVIDO")
+            set_lamp_state(False)
             ultimo_id = None
+
+def verifica_id(tag):
+    global URL, POSTO
+
+    # Corpo da requisição (JSON)
+    payload = {'tag': str(tag), 'posto': POSTO}
+    headers = {'Content-Type': 'application/json'}
+
+    try:
+        # Envia o POST para o servidor Flask
+        response = requests.post(URL, json=payload, headers=headers)
+
+        # Opcional: interpretar o JSON de retorno
+        if response.ok:
+            data = response.json()
+            if data.get("autorizado"):
+                print(f"Acesso liberado para: {data['funcionario']['nome']}")
+                set_lamp_state(True)
+            else:
+                print("Acesso negado ou tag não reconhecida.")
+        else:
+            print("Erro na comunicação com o servidor.")
+
+    except Exception:
+        print(f"Erro ao enviar requisição: {Exception}")
 
 def verifica_sensor_indutivo(pino_sensor, cliente):
     """Detecta chegada e saída de palete."""
@@ -157,7 +187,7 @@ client.loop_start()
 # --- LOOP PRINCIPAL ---
 try:
     while True:
-        verificar_cartao(leitor, client, TOPIC)
+        verificar_cartao(leitor)
         verifica_sensor_indutivo(SENSOR_PALETE, client)
         verifica_pedal(PEDAL, client)
         verifica_parafusadeira(SENSOR_CORRENTE, client)
@@ -173,7 +203,7 @@ try:
         time.sleep(0.1)
 
 except KeyboardInterrupt:
-    print("\n🛑 Programa encerrado.")
+    print("\nPrograma encerrado.")
 
 finally:
     GPIO.cleanup()
