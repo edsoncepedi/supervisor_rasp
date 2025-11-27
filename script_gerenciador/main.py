@@ -13,7 +13,7 @@ TOPIC = "ControleProducao_DD"
 
 # --- CONFIGURAÇÕES DO FLASK ---
 URL = "http://172.16.10.175:7000/rfid__checkin_posto"  
-POSTO = "posto_1"
+POSTO = "posto_0"
 
 # --- DEFINIÇÃO DOS PINOS ---
 TOMADA_POSTO = 17
@@ -56,22 +56,30 @@ def on_connect(client, userdata, flags, reason_code, properties):
     else:
         print(f"Falha na conexão. Código de retorno: {reason_code}")
 
-def on_message(client, userdata, msg):
+def on_message(cliente, userdata, msg):
     """Processa mensagens recebidas via MQTT."""
-    global batedor, tempo_batedor
+    global ultimo_id
     mensagem = msg.payload.decode()
 
     match mensagem:
-        case "batedor":
-            print("Palete liberado")
-            batedor = True
-            tempo_batedor = time.time()
 
-        case "libera_posto":
-            set_lamp_state(True)
+        case "statusPalete":
+            status = GPIO.input(SENSOR_PALETE)
+            if not status: 
+                print("MQTT Check: Palete no Posto")
+                cliente.publish(TOPIC, 1)
+            else:
+                print("MQTT Check: Sem Palete")
+                cliente.publish(TOPIC, 0)
 
-        case "desliga_posto":
-            set_lamp_state(False)
+        case "statusCard":
+            # Verifica a memória do programa, não o hardware
+            if ultimo_id is None:
+                print("MQTT Check: Sem cartão")
+                cliente.publish(TOPIC, "None") 
+            else:
+                print(f"MQTT Check: ID {ultimo_id}")
+                cliente.publish(TOPIC, ultimo_id)
 
 # --- FUNÇÕES AUXILIARES ---
 def set_lamp_state(ativo):
@@ -151,6 +159,7 @@ def verifica_sensor_indutivo(pino_sensor, cliente):
         else:
             print("Palete removido")
             cliente.publish(TOPIC, "Palete removido")
+
 
 def verifica_pedal(pino_pedal, cliente):
     """Detecta acionamento do pedal."""
