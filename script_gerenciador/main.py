@@ -43,7 +43,7 @@ GPIO.setup(SENSOR_PALETE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(SENSOR_CORRENTE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(PEDAL, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-GPIO.output(TOMADA_POSTO, GPIO.HIGH)
+GPIO.output(TOMADA_POSTO, GPIO.LOW)
 GPIO.output(BATEDOR_POSTO, GPIO.HIGH)
 
 # --- CALLBACKS MQTT ---
@@ -58,7 +58,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
 
 def on_message(cliente, userdata, msg):
     """Processa mensagens recebidas via MQTT."""
-    global ultimo_id
+    global ultimo_id, batedor, tempo_batedor
     mensagem = msg.payload.decode()
 
     match mensagem:
@@ -80,6 +80,10 @@ def on_message(cliente, userdata, msg):
             else:
                 print(f"MQTT Check: ID {ultimo_id}")
                 cliente.publish(TOPIC, ultimo_id)
+        
+        case "batedor":
+            tempo_batedor = time.time()
+            batedor = True
 
 # --- FUNÇÕES AUXILIARES ---
 def set_lamp_state(ativo):
@@ -203,12 +207,13 @@ try:
 
         # Controle do batedor com tempo
         if batedor:
+            print("Palete livre")
             if time.time() - tempo_batedor <= 2:
+                print("ai dentro")
                 GPIO.output(BATEDOR_POSTO, GPIO.LOW)
             else:
                 GPIO.output(BATEDOR_POSTO, GPIO.HIGH)
                 batedor = False
-
         time.sleep(0.1)
 
 except KeyboardInterrupt:
