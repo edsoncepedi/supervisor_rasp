@@ -19,5 +19,7 @@ exec /usr/bin/chromium \
   --disable-session-crashed-bubble \
   --disable-infobars \
   --kiosk \
+  --disable-features=UseOzonePlatform \
+  --disable-gpu \
   --start-fullscreen \
-  "http://172.16.10.175:7000/associacao"
+  "http://172.16.10.175/posto/0"

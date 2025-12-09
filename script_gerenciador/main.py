@@ -12,7 +12,7 @@ PORT = 1883
 TOPIC = "ControleProducao_DD"
 
 # --- CONFIGURAÇÕES DO FLASK ---
-URL = "http://172.16.10.175:7000/rfid__checkin_posto"  
+URL = "http://172.16.10.175/rfid__checkin_posto"  
 POSTO = "posto_0"
 
 # --- DEFINIÇÃO DOS PINOS ---

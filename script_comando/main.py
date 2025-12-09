@@ -5,7 +5,7 @@ import time
 def button_calback(channel):
     print("Botão Pressionado")
     # Defina a URL e os dados a serem enviados na requisição POST
-    url = "http://172.16.10.175:7000/comando"
+    url = "http://172.16.10.175/comando"
     payload = {'comando': 'imprime_produto'}
 
     # Cabeçalhos da requisição
