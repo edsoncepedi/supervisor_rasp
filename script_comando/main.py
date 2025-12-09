@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
 
+BOTAO_IMPRESSORA = int(os.getenv('BOTAO_IMPRESSORA'))
+
 def button_calback(channel):
     print("Botão Pressionado")
     # Defina a URL e os dados a serem enviados na requisição POST
@@ -24,10 +26,10 @@ def button_calback(channel):
     print(f"Conteúdo da Resposta: {response.text}")
 
 def main():
-    GPIO.setmode(GPIO.BOARD)
-    GPIO.setup(11, GPIO.IN) 
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(BOTAO_IMPRESSORA, GPIO.IN) 
     
-    GPIO.add_event_detect(11, GPIO.FALLING, callback=button_calback, bouncetime=1000)
+    GPIO.add_event_detect(BOTAO_IMPRESSORA, GPIO.FALLING, callback=button_calback, bouncetime=1000)
 
     try:
         while True:
