@@ -1,148 +1,223 @@
 import RPi.GPIO as GPIO
 from mfrc522 import SimpleMFRC522
+import requests
 import paho.mqtt.client as mqtt
 import time
 
-GPIO.setmode(GPIO.BCM) 
+GPIO.setmode(GPIO.BCM)
 
 # --- CONFIGURAÇÕES DO BROKER ---
-BROKER = "172.16.10.175"   
-PORT = 1883                     
-TOPIC = "ControleProducao_DD"          
+BROKER = "172.16.10.175"
+PORT = 1883
+TOPIC = "ControleProducao_DD"
 
-# --- Definição dos Pinos ---a
-TOMADA_POSTO = 17 
-BATEDOR_POSTO = 27  
-BUTTON_PIN = 21 
+# --- CONFIGURAÇÕES DO FLASK ---
+URL = "http://172.16.10.175:7000/rfid__checkin_posto"  
+POSTO = "posto_0"
 
+# --- DEFINIÇÃO DOS PINOS ---
+TOMADA_POSTO = 17
+BATEDOR_POSTO = 27
+PEDAL = 21
+SENSOR_PALETE = 20
+SENSOR_CORRENTE = 16  # Sensor da parafusadeira (digital)
+
+# --- VARIÁVEIS GLOBAIS ---
 is_output_active = False
-miss_count = 0                # Conta quantas leituras falharam seguidas
-MISS_LIMIT = 5                # Tolerância: 5 leituras falhas (~0,5s)
 batedor = False
-tempo = time.time()
+tempo_batedor = 0
 
-ultimo_id = None              # Último cartão confirmado
-ultimo_id_lido = None         # Último cartão detectado (mesmo que temporário)
-ultimo_tempo_lido = 0         # Momento em que o cartão foi lido pela última vez
-TEMPO_PERDA_CARTAO = 1.0      # Tempo em segundos para considerar o cartão removido
+estado_anterior_parafusadeira = GPIO.HIGH
+estado_anterior_palete = GPIO.HIGH
+estado_anterior_pedal = GPIO.HIGH
 
-# --- Configuração dos Pinos ---
+ultimo_id = None
+ultimo_id_lido = None
+ultimo_tempo_lido = 0
+TEMPO_PERDA_CARTAO = 1.0  # Tempo para considerar que o cartão saiu
 
+# --- CONFIGURAÇÃO DOS PINOS ---
 GPIO.setup(TOMADA_POSTO, GPIO.OUT)
 GPIO.setup(BATEDOR_POSTO, GPIO.OUT)
-GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(SENSOR_PALETE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(SENSOR_CORRENTE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(PEDAL, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-GPIO.output(TOMADA_POSTO, GPIO.HIGH)
+GPIO.output(TOMADA_POSTO, GPIO.LOW)
 GPIO.output(BATEDOR_POSTO, GPIO.HIGH)
 
-def on_connect(client, userdata, flags, rc):
+# --- CALLBACKS MQTT ---
+def on_connect(client, userdata, flags, reason_code, properties):
     """Chamado quando o Raspberry conecta ao broker."""
-    if rc == 0:
-        print("✅ Conectado ao broker MQTT!")
+    if reason_code == 0:
+        print("Conectado ao broker MQTT!")
         client.subscribe(TOPIC)
-        print(f"📡 Assinado o tópico: {TOPIC}")
+        print(f"Assinado o tópico: {TOPIC}")
     else:
-        print(f"❌ Falha na conexão. Código de retorno: {rc}")
+        print(f"Falha na conexão. Código de retorno: {reason_code}")
 
-
-def on_message(client, userdata, msg):
+def on_message(cliente, userdata, msg):
+    """Processa mensagens recebidas via MQTT."""
+    global ultimo_id, batedor, tempo_batedor
     mensagem = msg.payload.decode()
 
     match mensagem:
+
+        case "statusPalete":
+            status = GPIO.input(SENSOR_PALETE)
+            if not status: 
+                print("MQTT Check: Palete no Posto")
+                cliente.publish(TOPIC, 1)
+            else:
+                print("MQTT Check: Sem Palete")
+                cliente.publish(TOPIC, 0)
+
+        case "statusCard":
+            # Verifica a memória do programa, não o hardware
+            if ultimo_id is None:
+                print("MQTT Check: Sem cartão")
+                cliente.publish(TOPIC, "None") 
+            else:
+                print(f"MQTT Check: ID {ultimo_id}")
+                cliente.publish(TOPIC, ultimo_id)
+        
         case "batedor":
-            global batedor, tempo 
-            print("✅ - Palete liberado")
+            tempo_batedor = time.time()
             batedor = True
-            tempo = time.time()
-        
-        case "libera_posto":
-            set_lamp_state(True)
-        
-        case "desliga_posto":
-            set_lamp_state(False)
 
-def set_lamp_state(active_status):
+# --- FUNÇÕES AUXILIARES ---
+def set_lamp_state(ativo):
+
     global is_output_active
-
-    if active_status != is_output_active:
-        if active_status:
+    # Só faz algo se o novo estado for diferente do atual
+    if ativo != is_output_active:
+        if ativo:
+            # Liga a tomada (nível baixo no pino)
             GPIO.output(TOMADA_POSTO, GPIO.LOW)
-            print("✅ - Posto Liberado")
+            print("Posto Liberado")
         else:
+            # Desliga a tomada (nível alto no pino)
             GPIO.output(TOMADA_POSTO, GPIO.HIGH)
-            print("❌ - Posto Desligado")
+            print("Posto Desligado")
 
-        is_output_active = active_status
+        # Atualiza o estado armazenado
+        is_output_active = ativo
 
-def verificar_cartao(leitor, cliente_mqtt, topico):
-
+def verificar_cartao(leitor):
+    """Verifica presença e remoção de cartões RFID."""
     global ultimo_id, ultimo_id_lido, ultimo_tempo_lido
 
-    id_atual = leitor.read_id_no_block()  # Lê o cartão (ou None)
+    id_atual = leitor.read_id_no_block()
 
-    # --- Quando há um cartão detectado ---
-    if id_atual:
+    if id_atual:  # Cartão detectado
         ultimo_id_lido = id_atual
         ultimo_tempo_lido = time.time()
 
-        # Se for um novo cartão, diferente do anterior confirmado
         if id_atual != ultimo_id:
             ultimo_id = id_atual
-            print(f"🪪 Novo cartão detectado: {id_atual}")
-            cliente_mqtt.publish(topico, f"{id_atual}")
+            print(f"Cartão detectado: {id_atual}")
+            verifica_id(id_atual)
 
-    # --- Quando não há cartão detectado ---
-    else:
-        # Se havia um cartão e já passou tempo suficiente sem detectar nada
+    else:  # Nenhum cartão detectado
         if ultimo_id is not None and (time.time() - ultimo_tempo_lido > TEMPO_PERDA_CARTAO):
-            print("🚫 Cartão removido.")
-            cliente_mqtt.publish(topico, "REMOVIDO")
-            ultimo_id = None  # Reseta o estado
+            print("Cartão removido.")
+            set_lamp_state(False)
+            ultimo_id = None
 
-    # Pode colocar um pequeno atraso se quiser aliviar a CPU
-    time.sleep(0.1)
+def verifica_id(tag):
+    global URL, POSTO
 
-def verifica_palete():
-    mensagem = "Chegou Palete"
-    client.publish(TOPIC, mensagem)
+    # Corpo da requisição (JSON)
+    payload = {'tag': str(tag), 'posto': POSTO}
+    headers = {'Content-Type': 'application/json'}
 
-# Crie um objeto SimpleMFRC522
-reader = SimpleMFRC522()
+    try:
+        # Envia o POST para o servidor Flask
+        response = requests.post(URL, json=payload, headers=headers)
 
-# --- CRIA CLIENTE MQTT ---
-client = mqtt.Client()
-client.connect(BROKER, PORT, keepalive=60)
+        # Opcional: interpretar o JSON de retorno
+        if response.ok:
+            data = response.json()
+            if data.get("autorizado"):
+                print(f"Acesso liberado para: {data['funcionario']['nome']}")
+                set_lamp_state(True)
+            else:
+                print("Acesso negado ou tag não reconhecida.")
+        else:
+            print("Erro na comunicação com o servidor.")
 
-# --- CONFIGURA E CONECTA O CLIENTE ---
+    except Exception:
+        print(f"Erro ao enviar requisição: {Exception}")
+
+def verifica_sensor_indutivo(pino_sensor, cliente):
+    """Detecta chegada e saída de palete."""
+    global estado_anterior_palete
+    estado_atual = GPIO.input(pino_sensor)
+
+    if estado_atual != estado_anterior_palete:
+        estado_anterior_palete = estado_atual
+
+        if estado_atual == GPIO.LOW:
+            print("Chegou palete")
+            cliente.publish(TOPIC, "Chegou palete")
+        else:
+            print("Palete removido")
+            cliente.publish(TOPIC, "Palete removido")
+
+
+def verifica_pedal(pino_pedal, cliente):
+    """Detecta acionamento do pedal."""
+    global estado_anterior_pedal
+    estado_atual = GPIO.input(pino_pedal)
+
+    if estado_atual != estado_anterior_pedal:
+        estado_anterior_pedal = estado_atual
+
+        if estado_atual == GPIO.LOW:
+            print("Pedal pressionado")
+            cliente.publish(TOPIC, "Pedal")
+
+def verifica_parafusadeira(pino_sensor, cliente):
+    """Detecta acionamento da parafusadeira."""
+    global estado_anterior_parafusadeira
+    estado_atual = GPIO.input(pino_sensor)
+
+    if estado_atual != estado_anterior_parafusadeira:
+        estado_anterior_parafusadeira = estado_atual
+
+        if estado_atual == GPIO.LOW:
+            print("Parafusadeira acionada")
+            cliente.publish(TOPIC, "Parafusadeira")
+
+# --- CONFIGURAÇÃO INICIAL ---
+leitor = SimpleMFRC522()
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 client.on_connect = on_connect
 client.on_message = on_message
-
+client.connect(BROKER, PORT, keepalive=60)
 client.loop_start()
 
+# --- LOOP PRINCIPAL ---
 try:
-    print("ONLINE!!")
     while True:
-        id = reader.read_id_no_block()
-        status_botao = GPIO.input(BUTTON_PIN)
+        verificar_cartao(leitor)
+        verifica_sensor_indutivo(SENSOR_PALETE, client)
+        verifica_pedal(PEDAL, client)
+        verifica_parafusadeira(SENSOR_CORRENTE, client)
 
-        verificar_cartao(reader, client, TOPIC)
-
-        if status_botao == GPIO.LOW:
-            print("Pedal Pressionado")
-            client.publish(TOPIC, "Pedal")
-        
+        # Controle do batedor com tempo
         if batedor:
-            tempo_decorrido = time.time() - tempo
-            if tempo_decorrido <= 2:
+            print("Palete livre")
+            if time.time() - tempo_batedor <= 2:
+                print("ai dentro")
                 GPIO.output(BATEDOR_POSTO, GPIO.LOW)
             else:
                 GPIO.output(BATEDOR_POSTO, GPIO.HIGH)
                 batedor = False
-
         time.sleep(0.1)
 
-except KeyboardInterrupt:   
-    print("\nStop: Programa encerrado.")
+except KeyboardInterrupt:
+    print("\nPrograma encerrado.")
 
 finally:
     GPIO.cleanup()
