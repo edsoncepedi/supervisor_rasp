@@ -1,25 +1,46 @@
 #!/bin/bash
+# --- 1. DESCOBRE ONDE O SCRIPT EST√Å ---
+# Isso pega o caminho completo da pasta onde este arquivo .sh est√° salvo
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 
-# Usu·rio dono da sess„o gr·fica
+# Define o caminho do .env baseando-se na localiza√ß√£o do script (sobe um n√≠vel)
+ENV_PATH="$SCRIPT_DIR/../.env"
+
+# --- 2. CARREGA O .ENV ---
+set -a
+if [ -f "$ENV_PATH" ]; then
+    source "$ENV_PATH"
+    echo "Sucesso: .env carregado de $ENV_PATH"
+else
+    echo "ERRO CR√çTICO: .env n√£o encontrado em $ENV_PATH"
+    # Opcional: exit 1
+fi
+set +a
+
+# UsuÔøΩrio dono da sessÔøΩo grÔøΩfica
 USER_HOME="/home/cepedi"
 
-# Exporta vari·veis necess·rias para usar o X da sess„o gr·fica
+# Exporta variÔøΩveis necessÔøΩrias para usar o X da sessÔøΩo grÔøΩfica
 export DISPLAY=":0"
 export XAUTHORITY="$USER_HOME/.Xauthority"
 export HOME="$USER_HOME"
 
-# Garante que os diretÛrios de config/crashpad existem
+# Garante que os diretÔøΩrios de config/crashpad existem
 mkdir -p "$HOME/.config/chromium/Crashpad"
 
-# Opcional: pequeno delay pra garantir que a interface j· subiu
+# Opcional: pequeno delay pra garantir que a interface jÔøΩ subiu
 sleep 3
+
+echo "http://$IP_SERVER/posto/$POSTO"
 
 exec /usr/bin/chromium \
   --noerrdialogs \
   --disable-session-crashed-bubble \
   --disable-infobars \
   --kiosk \
-  --disable-features=UseOzonePlatform \
+  --disable-features=UseOzonePlatform,Translate,TranslateUI \
+  --disable-translate \
+  --no-first-run \
   --disable-gpu \
   --start-fullscreen \
-  "http://172.16.10.175/posto/0"
+  "http://$IP_SERVER/posto/$POSTO"

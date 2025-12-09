@@ -3,24 +3,29 @@ from mfrc522 import SimpleMFRC522
 import requests
 import paho.mqtt.client as mqtt
 import time
+import os
+from dotenv import load_dotenv
+
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(dotenv_path=dotenv_path)
 
 GPIO.setmode(GPIO.BCM)
 
 # --- CONFIGURAÇÕES DO BROKER ---
-BROKER = "172.16.10.175"
-PORT = 1883
+BROKER = os.getenv('IP_SERVER')
+PORT = int(os.getenv('PORT_MQTT', 1883))
 TOPIC = "ControleProducao_DD"
 
 # --- CONFIGURAÇÕES DO FLASK ---
-URL = "http://172.16.10.175/rfid__checkin_posto"  
-POSTO = "posto_0"
+URL = f"http://{os.getenv('IP_SERVER')}/rfid__checkin_posto"
+POSTO = f"posto_{int(os.getenv('POSTO'))}"
 
 # --- DEFINIÇÃO DOS PINOS ---
-TOMADA_POSTO = 17
-BATEDOR_POSTO = 27
-PEDAL = 21
-SENSOR_PALETE = 20
-SENSOR_CORRENTE = 16  # Sensor da parafusadeira (digital)
+TOMADA_POSTO = int(os.getenv('TOMADA_POSTO'))
+BATEDOR_POSTO = int(os.getenv('BATEDOR_POSTO'))
+PEDAL = int(os.getenv('PEDAL'))
+SENSOR_PALETE = int(os.getenv('SENSOR_PALETE'))
+SENSOR_CORRENTE = int(os.getenv('SENSOR_CORRENTE'))  # Sensor da parafusadeira (digital)
 
 # --- VARIÁVEIS GLOBAIS ---
 is_output_active = False
