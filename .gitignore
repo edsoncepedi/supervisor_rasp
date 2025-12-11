@@ -12,6 +12,7 @@ venv/
 **/.venv/
 **/env/
 **/.env/
+**/degirum_env/
 
 # Ignora configuracoes de IDEs
 .vscode/
