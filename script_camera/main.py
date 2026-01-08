@@ -5,17 +5,11 @@ import os
 import json
 from pprint import pprint
 from hailo_postprocess import postprocess_detection_results
+from hailo_postprocess import IDManager
 import numpy as np
 import json
-from sort import Sort
 
-tracker = Sort(
-    max_age=200,
-    min_hits=3,
-    iou_threshold=0.3
-)
-
-
+id_manager = IDManager()
 
 
 # ================================
@@ -65,10 +59,10 @@ while True:
     try:
         result = model(input_tensor)
         print(result.results[0]["data"])
-        pprint(result.results)
+        #pprint(result.results)
 
     except dg.exceptions.DegirumException as e:
-        print("❌ Erro na inferência:", e)
+        print(" Erro na inferência:", e)
         break
     
     # ================================
@@ -82,35 +76,17 @@ while True:
 
     detections = postprocess_detection_results(result.results[0]["data"],model.input_shape[0],6, label_dictionary )
     #pprint(detections)
-    print(detections)
-    sort_input = []
-    sort_input_with_label = []
-    for det in detections:
-        x1, y1, x2, y2 = map(int, det["bbox"])
-        label = det["label"]
-        score = det["score"]
+    fixed_objects = id_manager.check_available_ids(detections)
 
-        sort_input.append([x1, y1, x2, y2, score])
-        sort_input_with_label.append([x1, y1, x2, y2, score, label])
-        # Desenhar retângulo e label
-        #cv2.rectangle(frame_resized, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        #cv2.putText(frame_resized, f"{label} {score:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0),  2 )
-    
-    sort_input = np.array(sort_input) if len(sort_input) > 0 else np.empty((0, 5))
+    for fid, obj in fixed_objects.items():
+        if obj["bbox"] is None:
+            continue
+        x1, y1, x2, y2 = map(int, obj["bbox"])
+        color = (0, 255, 0) if obj["active"] else (0, 0, 255)
+        cv2.rectangle(frame_resized, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(frame_resized, f"{fid}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    print("SORT -> id fixo:", id_manager.sort_to_fixed)
 
-    tracks = tracker.update(sort_input)
-    for track in tracks:
-        x1, y1, x2, y2, track_id = map(int, track)
-        cv2.rectangle(frame_resized, (x1, y1), (x2, y2), (255, 0, 0), 2)
-        cv2.putText(
-            frame_resized,
-            f"ID {track_id}",
-            (x1, y1 - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (255, 0, 0),
-            2
-        )
     # Mostrar resultado
     cv2.imshow("Hailo PySDK - DigitalDash", frame_resized)
 
@@ -123,4 +99,4 @@ while True:
 # ================================
 cap.release()
 cv2.destroyAllWindows()
-print("🛑 Encerrado")
+print("Encerrado")
