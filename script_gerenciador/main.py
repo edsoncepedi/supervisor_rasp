@@ -135,14 +135,33 @@ def verificar_cartao(leitor):
     else:  # Nenhum cartão detectado
         if ultimo_id is not None and (time.time() - ultimo_tempo_lido > TEMPO_PERDA_CARTAO):
             print("Cartão removido.")
+            checkout()
             set_lamp_state(False)
             ultimo_id = None
+
+def checkout():
+    """Realiza o checkout do funcionário."""
+    global URL, POSTO
+
+    payload = {'tag': None, 'posto': POSTO, 'acao': 'saida'}
+    headers = {'Content-Type': 'application/json'}
+
+    try:
+        response = requests.post(URL, json=payload, headers=headers)
+
+        if response.ok:
+            print("Checkout realizado com sucesso.")
+        else:
+            print("Erro ao realizar checkout.")
+
+    except Exception:
+        print(f"Erro ao enviar requisição de checkout: {Exception}")
 
 def verifica_id(tag):
     global URL, POSTO
 
     # Corpo da requisição (JSON)
-    payload = {'tag': str(tag), 'posto': POSTO}
+    payload = {'tag': str(tag), 'posto': POSTO, 'acao': 'entrada'}
     headers = {'Content-Type': 'application/json'}
 
     try:
