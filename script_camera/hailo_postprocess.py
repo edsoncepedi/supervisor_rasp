@@ -219,7 +219,7 @@ class IDManager:
                 fixed_id = self._assign_new_fixed_id(label)
 
                 if fixed_id is None:
-                    print(f" Classe '{label}' sem IDs disponíveis")
+                    #print(f" Classe '{label}' sem IDs disponíveis")
                     continue
 
                 self.sort_to_fixed[sort_id] = fixed_id
