@@ -1,5 +1,5 @@
 import os
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
+#os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 import signal
 import cv2
@@ -32,7 +32,7 @@ ZOO_PATH = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/dig
 LABELS_FILES = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/labels_coco.json"
 CAMERA_ID = 0
 SERVER_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/atualizar_borda"
-SEND_FPS = 20  # Taxa de envio para o servidor
+SEND_FPS = 30  # Taxa de envio para o servidor
 
 interface_grafica = False  # Define se a interface gráfica (OpenCV) será usada
 
@@ -128,8 +128,10 @@ def process_yolo(output_queue, stop_event):
     cap = cv2.VideoCapture(CAMERA_ID)
     
     # Configurações opcionais para forçar resolução/FPS (melhora estabilidade no Rasp)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    FRAME_WIDTH = 640
+    FRAME_HEIGHT = 480
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
     cap.set(cv2.CAP_PROP_FPS, 30)
 
     if not cap.isOpened():
@@ -166,7 +168,8 @@ def process_yolo(output_queue, stop_event):
             result.results[0]["data"], 
             model.input_shape[0], 
             6, 
-            label_dictionary
+            label_dictionary,
+            confidence_threshold=0.6
         )
         
         detections_roi = filtrar_detections_por_roi(detections, ROI)
@@ -183,13 +186,27 @@ def process_yolo(output_queue, stop_event):
                 continue
             
             x1, y1, x2, y2 = map(int, obj["bbox"])
+
+            if (f"{fid}" == "cpu1" or f"{fid}" == "fan1"):
+                pad_w = 16
+                pad_h = 16
+
+                x1 = max(0, x1 - pad_w)
+                y1 = max(0, y1 - pad_h)
+                x2 = x2 + pad_w
+                y2 = y2 + pad_h
+
+            elif (f"{fid}" == "pallet1"):
+                continue
+            
             color = (0, 255, 0) if obj["active"] else (0, 0, 255)
 
             retangulos.append({
                 "id": f"{fid}",
                 "x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1,
                 "texto": f"{fid}",
-                "cor": "#FFFFFF",
+                #"texto": f"",
+                "cor": "#7E7C00",
                 "mostra": True
             })
             if interface_grafica:
