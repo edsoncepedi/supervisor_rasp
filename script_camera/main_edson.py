@@ -1,13 +1,21 @@
+import os
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+import signal
 import cv2
 import numpy as np
 import degirum as dg
-import os
 import json
 import multiprocessing
 import requests 
 import math
 import time
 from pprint import pprint
+
+from dotenv import load_dotenv
+
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(dotenv_path=dotenv_path)
 
 # Imports locais (assumindo que estão na mesma pasta ou no PATH)
 from hailo_postprocess import postprocess_detection_results
@@ -18,12 +26,15 @@ from assembly_manager import bbox_inside_roi
 # ================================
 # Configurações Globais (Constantes)
 # ================================
+POSTO = int(os.getenv("POSTO"))
 MODEL_NAME = "digitaldashv3"
 ZOO_PATH = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/digitaldashv3.json"
 LABELS_FILES = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/labels_coco.json"
 CAMERA_ID = 0
-SERVER_URL = "http://172.16.10.175:5000/api/atualizar_borda" 
+SERVER_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/atualizar_borda"
 SEND_FPS = 20  # Taxa de envio para o servidor
+
+interface_grafica = False  # Define se a interface gráfica (OpenCV) será usada
 
 # ROI: x, y, largura, altura
 ROI_X = 0
@@ -55,12 +66,12 @@ def filtrar_detections_por_roi(detections, roi):
 # ==========================================
 # PROCESSO 1: ENVIO VIA HTTP
 # ==========================================
-def process_sender(input_queue):
+def process_sender(input_queue, stop_event):
     print("📡 Processo de envio HTTP iniciado...")
     session = requests.Session()
     intervalo = 1.0 / SEND_FPS
 
-    while True:
+    while not stop_event.is_set():
         loop_start = time.time()
         payload = None
         
@@ -85,7 +96,7 @@ def process_sender(input_queue):
 # ==========================================
 # PROCESSO 2: YOLO / HAILO (Processamento de Imagem)
 # ==========================================
-def process_yolo(output_queue):
+def process_yolo(output_queue, stop_event):
     print("⚙️ Inicializando processo YOLO...")
 
     # --- 1. Inicialização de Objetos (DENTRO DO PROCESSO) ---
@@ -128,7 +139,7 @@ def process_yolo(output_queue):
         print("✅ Câmera aberta!")
 
     # --- 3. Loop Principal ---
-    while True:
+    while not stop_event.is_set():
         ret, frame = cap.read()
         if not ret:
             print("⚠️ Falha ao ler frame da câmera.")
@@ -181,12 +192,12 @@ def process_yolo(output_queue):
                 "cor": "#FFFFFF",
                 "mostra": True
             })
+            if interface_grafica:
+                cv2.rectangle(frame_resized, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame_resized, f"{fid}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-            cv2.rectangle(frame_resized, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame_resized, f"{fid}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-
-        # Desenha ROI
-        cv2.rectangle(frame_resized, (ROI["x1"], ROI["y1"]), (ROI["x2"], ROI["y2"]), (255, 255, 0), 2)
+        if interface_grafica:
+            cv2.rectangle(frame_resized, (ROI["x1"], ROI["y1"]), (ROI["x2"], ROI["y2"]), (255, 255, 0), 2)
 
         # Envia para o processo HTTP
         payload = {
@@ -196,34 +207,46 @@ def process_yolo(output_queue):
 
         if not output_queue.full():
             output_queue.put(payload)
-            
-        cv2.imshow("Hailo PySDK - DigitalDash", frame_resized)
+        
+        if interface_grafica:
+            cv2.imshow("Hailo PySDK - DigitalDash", frame_resized)
 
-        if cv2.waitKey(1) & 0xFF == 27: # ESC
-            break
+            if cv2.waitKey(1) & 0xFF == 27: # ESC
+                break
 
     cap.release()
-    cv2.destroyAllWindows()
+    if interface_grafica:
+        cv2.destroyAllWindows()
     print("🛑 Processo YOLO Encerrado")
 
+def shutdown_handler(sig, frame):
+    print("🛑 SIGTERM recebido, encerrando processos...")
+    stop_event.set()
+
 if __name__ == "__main__":
-    # Garante o método de start correto no Linux/Raspberry
     multiprocessing.set_start_method('fork', force=True)
 
     fila_dados = multiprocessing.Queue(maxsize=3)
-    
-    p_sender = multiprocessing.Process(target=process_sender, args=(fila_dados,))
-    p_yolo = multiprocessing.Process(target=process_yolo, args=(fila_dados,))
+    stop_event = multiprocessing.Event()
+
+    p_sender = multiprocessing.Process(
+        target=process_sender,
+        args=(fila_dados, stop_event)
+    )
+
+    p_yolo = multiprocessing.Process(
+        target=process_yolo,
+        args=(fila_dados, stop_event)
+    )
+
+    signal.signal(signal.SIGTERM, shutdown_handler)
+    signal.signal(signal.SIGINT, shutdown_handler)
 
     print("🚀 Iniciando processos...")
     p_sender.start()
     p_yolo.start()
 
-    try:
-        p_yolo.join()
-    except KeyboardInterrupt:
-        print("\nInterrupção manual.")
-    finally:
-        p_sender.terminate()
-        p_yolo.terminate()
-        print("Tudo limpo.")
+    p_sender.join()
+    p_yolo.join()
+
+    print("✅ Finalizado corretamente")

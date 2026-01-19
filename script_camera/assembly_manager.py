@@ -18,7 +18,7 @@ class AssemblyManagar:
 
     def contar_produtos_posto(self, detections):
         contagem = Counter(d["label"] for d in detections)
-        print(contagem) 
+        #print(contagem) 
     
         
     def gerenciador_etapas(self, detections):
