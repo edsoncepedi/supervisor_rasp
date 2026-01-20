@@ -169,7 +169,7 @@ def process_yolo(output_queue, stop_event):
             model.input_shape[0], 
             6, 
             label_dictionary,
-            confidence_threshold=0.6
+            confidence_threshold=0.3
         )
         
         detections_roi = filtrar_detections_por_roi(detections, ROI)
@@ -188,8 +188,8 @@ def process_yolo(output_queue, stop_event):
             x1, y1, x2, y2 = map(int, obj["bbox"])
 
             if (f"{fid}" == "cpu1" or f"{fid}" == "fan1"):
-                pad_w = 16
-                pad_h = 16
+                pad_w = 20
+                pad_h = 20
 
                 x1 = max(0, x1 - pad_w)
                 y1 = max(0, y1 - pad_h)
@@ -206,7 +206,7 @@ def process_yolo(output_queue, stop_event):
                 "x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1,
                 "texto": f"{fid}",
                 #"texto": f"",
-                "cor": "#7E7C00",
+                "cor": "#FFFB00",
                 "mostra": True
             })
             if interface_grafica:
