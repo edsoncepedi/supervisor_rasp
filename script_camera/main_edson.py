@@ -31,7 +31,7 @@ MODEL_NAME = "digitaldashv3"
 ZOO_PATH = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/digitaldashv3.json"
 LABELS_FILES = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/labels_coco.json"
 CAMERA_ID = 0
-SERVER_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/atualizar_borda"
+SERVER_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/atualizar_borda/{POSTO}"
 SEND_FPS = 30  # Taxa de envio para o servidor
 
 interface_grafica = False  # Define se a interface gráfica (OpenCV) será usada
