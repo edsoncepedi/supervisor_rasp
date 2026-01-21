@@ -93,3 +93,18 @@ sudo supervisorctl start all
 
 > 💡 **Dica:** mantenha cada aplicação em um `.conf` separado dentro de `/etc/supervisor/conf.d/`,  
 > e use `reread + update` sempre que editar algo.
+
+
+## ⚙️ Requisitos do Sistema
+
+Para garantir a compatibilidade total com este projeto, é necessário utilizar a versão específica do **Raspberry Pi OS** listada abaixo.
+
+> **⚠️ Atenção:** Não utilize a versão padrão mais recente (que utiliza Wayland). O projeto foi homologado para funcionar na versão **Legacy** (baseada em X11).
+
+### Versão Homologada:
+* **Nome:** `Raspberry Pi OS (Legacy, 64-bit) Full`
+* **Base:** Port of Debian Bookworm
+* **Data de Lançamento:** 2025-11-24
+* **Tamanho:** ~3.2 GB
+
+Certifique-se de escolher a opção que inclui **"Desktop environment and recommended applications"**.
