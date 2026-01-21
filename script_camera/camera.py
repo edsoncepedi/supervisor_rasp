@@ -120,7 +120,7 @@ try:
             model.input_shape[0],
             6, 
             label_dictionary,
-            confidence_threshold=0.6
+            confidence_threshold=0.3
         )
         
         detections_roi = filtrar_detections_por_roi(detections, ROI)
