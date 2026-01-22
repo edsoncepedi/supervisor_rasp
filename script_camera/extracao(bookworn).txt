@@ -132,7 +132,8 @@ nudatus==0.0.5
 numpy==1.26.4
 oauthlib==3.2.2
 olefile==0.46
-opencv-python-headless==4.13.0.90
+################################opencv-python-headless==4.13.0.90
+opencv-python==4.11.0.86
 overrides==7.7.0
 packaging==23.0
 pafy==0.5.5

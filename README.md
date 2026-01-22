@@ -108,3 +108,16 @@ Para garantir a compatibilidade total com este projeto, é necessário utilizar 
 * **Tamanho:** ~3.2 GB
 
 Certifique-se de escolher a opção que inclui **"Desktop environment and recommended applications"**.
+
+# Passo a passo para problemas de acesso do VScode
+
+**Cenário:** O Raspberry Pi foi formatado/reinstalado (ex: mudou de Trixie para Bookworm) mantendo o mesmo IP, gerando um conflito de identidade ("Host key verification failed").
+
+### 1. Remover a Chave Antiga (No seu PC)
+O VS Code bloqueia a conexão pois a chave de segurança do novo sistema não bate com o registro antigo.
+
+**Opção A: Via Terminal (Mais rápido)**
+Abra o PowerShell ou CMD e execute:
+```bash
+ssh-keygen -R SEU_IP_DO_RASPBERRY
+# Exemplo: ssh-keygen -R 192.168.1.50

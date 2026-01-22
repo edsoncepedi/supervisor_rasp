@@ -15,9 +15,11 @@ DESTINO="/etc/supervisor/conf.d/"
 # Cria o link apenas se nao existir
 if [ ! -L "$DESTINO" ]; then
     echo "Criando link simbolico de $ORIGEM -> $DESTINO"
-    ln -s "$ORIGEM" "$DESTINO"
+    sudo ln -s "$ORIGEM" "$DESTINO"
 else
     echo "Link simbolico ja existe: $DESTINO"
 fi
 
 echo "Se desejar, reinicie o sistema com: sudo reboot"
+
+sudo reboot

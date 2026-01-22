@@ -1,0 +1,10 @@
+notebook==7.5.2
+ipykernel==6.17.0
+degirum==0.20.0
+degirum_tools==0.26.1
+degirum_cli==0.2.0
+numpy==1.26.4
+picamera2==0.3.31
+filterpy==1.4.5
+scikit-image==0.26.0
+lap==0.5.12

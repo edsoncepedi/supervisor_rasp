@@ -2,14 +2,17 @@
 
 # Define que o script deve parar imediatamente se qualquer comando der erro
 set -e
+
 cd "$(dirname "$0")"
 
-echo "--- Iniciando Setup Geral (Parte 3) ---"
+echo "--- Iniciando Setup Geral ---"
 
 # 1. REMOVER A TAREFA DO CRON
 crontab -l | grep -v "setup_apps_3.sh" | crontab - || true
+# (O || true evita que o script pare se o crontab estiver vazio)
 
 echo "--- Instalando Dependencias do Sistema ---"
+# CORREÇÃO: Adicionado -y para não travar pedindo confirmação
 sudo apt update && sudo apt install rpicam-apps -y
 sudo apt install imx500-all -y
 
@@ -20,10 +23,17 @@ rodar_script() {
 
     echo "--- Entrando em $PASTA para rodar $SCRIPT ---"
 
+    # Verifica se a pasta existe antes de entrar
     if [ -d "$PASTA" ]; then
         cd "$PASTA"
+
+        # Garante que o script é executável
         chmod +x "$SCRIPT"
+
+        # Roda o script
         ./"$SCRIPT"
+
+        # Volta para o diretório anterior (seguro)
         cd ..
     else
         echo "ERRO: Pasta $PASTA não encontrada!"
@@ -40,13 +50,4 @@ echo "--- Rodando Supervisor ---"
 chmod +x setup_supervisor.sh
 ./setup_supervisor.sh
 
-# --- LIMPEZA FINAL ---
-echo "--- Limpando arquivos de inicialização ---"
-# Remove o lançador visual para não abrir mais janelas nos próximos boots
-rm "$HOME/.config/autostart/monitor_install.desktop"
-
-echo "--- INSTALAÇÃO TOTALMENTE CONCLUÍDA! ---"
-echo "Você pode fechar esta janela agora."
-
-# Pequena pausa para garantir que a mensagem apareça antes de qualquer fechamento
-sleep 5
+echo "--- Concluido com Sucesso ---"

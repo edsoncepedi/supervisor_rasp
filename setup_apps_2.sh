@@ -1,26 +1,44 @@
 #!/bin/bash
 cd "$(dirname "$0")"
 
-# 1. REMOVER A TAREFA DO CRON (Auto-limpeza)
-# Remove qualquer linha que contenha o nome deste script do crontab
+# --- RECONFIGURAÇÃO DE AMBIENTE ---
+REAL_USER="$USER"
+REAL_HOME="$HOME"
+
+# 1. REMOVER A TAREFA DO CRON DESTE SCRIPT
 crontab -l | grep -v "setup_apps_2.sh" | crontab -
 
-# 2. Seu código continua aqui...
-echo "Estou rodando após o reboot!"
-# Instalar docker, baixar pacotes, etc...
+echo "--- Iniciando Parte 2 (Pós-Reboot) ---"
+echo "Instalando dependências pesadas..."
 
+# Instalações
 sudo apt install dkms -y
 sudo apt install hailo-all -y
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Caminho absoluto do script que deve rodar DEPOIS do reboot
+# --- PREPARAÇÃO PARA O PRÓXIMO BOOT (Parte 3) ---
 SCRIPT_POS_REBOOT="$SCRIPT_DIR/setup_apps_3.sh"
-LOG_FILE="$HOME/setup_log3.txt"
+LOG_FILE="$REAL_HOME/setup_log3.txt"
 
-# Adiciona ao Cronjob para rodar no próximo boot
-# A linha abaixo diz: "No reboot, rode o script e envie o log para um arquivo"
+# 1. Cria o log 3 e ajusta permissões
+touch "$LOG_FILE"
+
+# 2. ATUALIZA o Autostart Visual para ler o NOVO log
+# Simplesmente sobrescrevemos o arquivo .desktop apontando para o setup_log3.txt
+DESKTOP_FILE="$REAL_HOME/.config/autostart/monitor_install.desktop"
+
+cat <<EOF > "$DESKTOP_FILE"
+[Desktop Entry]
+Type=Application
+Name=Instalação Parte 3
+Exec=lxterminal --title="Finalizando Instalação... (NÃO FECHE)" -e "tail -f $LOG_FILE"
+Terminal=false
+X-KeepTerminal=true
+EOF
+
+# 3. Agenda a Parte 3 no Cron
 (crontab -l 2>/dev/null; echo "@reboot $SCRIPT_POS_REBOOT >> $LOG_FILE 2>&1") | crontab -
 
-echo "Configuração inicial feita. Reiniciando..."
+echo "Parte 2 concluída. Reiniciando para etapa final..."
 sudo reboot
