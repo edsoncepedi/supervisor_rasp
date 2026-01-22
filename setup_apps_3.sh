@@ -10,4 +10,22 @@ sudo apt update && sudo apt install rpicam-apps
 
 sudo apt install imx500-all -y
 
-sudo reboot
+cd script_camera
+
+./setup_script_rasp5.sh
+
+cd ..
+
+cd script_comando
+
+./setup_script_rasp5.sh
+
+cd ..
+
+cd script_gerencidador
+
+./setup_script_rasp5.sh
+
+cd ..
+
+./setup_supervisor.sh

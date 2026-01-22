@@ -1,10 +1,10 @@
-contextlib2 
-pandas-stubs
-filterpy==1.4.5
-scikit-image==0.17.2
-numpy==1.26.4
-lap==0.4.0
+notebook
 ipykernel
 degirum
 degirum_tools
 degirum_cli
+numpy==1.26.4
+picamera2==0.3.31
+filterpy==1.4.5
+scikit-image
+lap
