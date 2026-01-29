@@ -133,7 +133,7 @@ class IDManager:
             iou_threshold=0.3
         )       
         
-    def _assign_id_to_label(self, detections):
+    def assign_id_to_label(self, detections):
 
         sort_input = []
 
@@ -177,7 +177,31 @@ class IDManager:
 
 
         return sort_with_label
+    def get_unassigned_tracks(self, detections, fixed_ids):
+        unassigned = []
+        fixed_track_ids = {
+            slot["track_id"]
+            for slot in fixed_ids.values()
+            if slot.get("track_id") is not None
+        }
 
+        for item in detections:
+            track_id = item['track_id']
+            x1, y1, x2, y2 = item['bbox']
+            label = item['label']
+
+            if track_id not in fixed_track_ids:
+                unassigned.append({
+                    "track_id": track_id,
+                    "bbox": [x1, y1, x2, y2],
+                    "label": label
+                })
+
+        return unassigned
+
+
+
+        
     def _cleanup_dead_tracks(self):
         active_sort_ids = {int(track[-1]) for track in self.tracks}
 
@@ -200,7 +224,7 @@ class IDManager:
         for fid in self.fixed_objects:
             self.fixed_objects[fid]["active"] = False
 
-        labels_with_id = self._assign_id_to_label(detections)
+        labels_with_id = self.assign_id_to_label(detections)
 
         for item in labels_with_id:
             sort_id = item["track_id"]
@@ -219,6 +243,7 @@ class IDManager:
                 fixed_id = self._assign_new_fixed_id(label)
 
                 if fixed_id is None:
+                    
                     #print(f" Classe '{label}' sem IDs disponíveis")
                     continue
 

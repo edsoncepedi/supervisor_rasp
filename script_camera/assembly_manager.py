@@ -7,7 +7,7 @@ from collections import Counter
 class AssemblyManagar:
     def __init__(self, posto:int):
         self.etapa_atual= int(1)
-        self.posto = posto # 1 ou 2
+        self.posto = posto # 0, '1 ou 2
         self.frame = None
         self.valid2 = False
         self.valid3 = False
@@ -21,7 +21,7 @@ class AssemblyManagar:
         #print(contagem) 
     
         
-    def gerenciador_etapas(self, detections):
+    def gerenciador_etapas(self, detections)->int:
         
         match self.etapa_atual:
             case 1:
@@ -45,6 +45,8 @@ class AssemblyManagar:
 
             case 5: 
                 print("Posto finalizado ")
+
+        return self.etapa_atual
 
     def _verificar_boxes_validas(self, detections, fid):
         if detections[fid]["bbox"] is not None:

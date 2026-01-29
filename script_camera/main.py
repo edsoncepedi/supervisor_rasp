@@ -1,4 +1,4 @@
-interface_grafica = False  # Define se a interface gráfica (OpenCV) será usada
+interface_grafica = True  # Define se a interface gráfica (OpenCV) será usada
 
 import os
 if not interface_grafica:
@@ -34,7 +34,7 @@ MODEL_NAME = "digitaldashv3"
 ZOO_PATH = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/digitaldashv3.json"
 LABELS_FILES = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/labels_coco.json"
 CAMERA_ID = 0
-SERVER_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/atualizar_borda/{POSTO}"
+SERVER_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/camera/{POSTO}"
 SEND_FPS = 30  # Taxa de envio para o servidor
 
 MODEL_W = 640
@@ -106,7 +106,7 @@ def process_yolo(output_queue, stop_event):
     # --- 1. Inicialização de Objetos (DENTRO DO PROCESSO) ---
     try:
         id_manager = IDManager()
-        assembly_manager = AssemblyManagar(posto=2) 
+        assembly_manager = AssemblyManagar(posto=POSTO) 
         
         print(f"📂 Carregando modelo: {ZOO_PATH}")
         model = dg.load_model(
@@ -176,11 +176,9 @@ def process_yolo(output_queue, stop_event):
         
         detections_roi = filtrar_detections_por_roi(detections, ROI)
 
-        # Lógica de Negócio
-        assembly_manager.contar_produtos_posto(detections_roi)
+        #assembly_manager.contar_produtos_posto(detections_roi)
         fixed_objects = id_manager.check_available_ids(detections_roi)
-        assembly_manager.gerenciador_etapas(fixed_objects)
-
+        
         # Desenho e Preparação do Payload
         retangulos = []
         for fid, obj in fixed_objects.items():
@@ -218,21 +216,77 @@ def process_yolo(output_queue, stop_event):
         if interface_grafica:
             cv2.rectangle(frame_resized, (ROI["x1"], ROI["y1"]), (ROI["x2"], ROI["y2"]), (255, 255, 0), 2)
 
-        # Envia para o processo HTTP
-        payload = {
-            "acao": "overlay_update",
-            "retangulos": retangulos
-        }
+        # Lógica de Negócio
+        if POSTO == 0:
+
+            all_detections = id_manager.assign_id_to_label(detections_roi)
+            #print(all_detections)
+            
+            unassigned_detections  = id_manager.get_unassigned_tracks(all_detections,fixed_objects)
+            unassigned = []
+            
+            
+            # Desenho e Preparação do Payload
+            
+            for detect in unassigned_detections:
+                if detect["bbox"] is None:
+                    continues
+                x1, y1, x2, y2 = map(int, detect["bbox"])
+                if (detect["label"] == "cpu" or detect["label"] == "fan"):
+                    pad_w = 20
+                    pad_h = 20
+                    x1 = max(0, x1 - pad_w)
+                    y1 = max(0, y1 - pad_h)
+                    x2 = x2 + pad_w
+                    y2 = y2 + pad_h
+                elif (detect["label"] == "pallet"):
+                    continue
+                
+                color = (0, 255, 0) 
+
+                unassigned.append({
+                    "id": detect["track_id"],
+                    "x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1,
+                    "texto": detect["label"],
+                    "cor": "#FFFB00",
+                    "mostra": True
+                })
+
+                if interface_grafica:
+                    cv2.rectangle(frame_resized, (x1, y1), (x2, y2), color, 2)
+                    cv2.putText(frame_resized, detect["label"], (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            # Envia para o processo HTTP
+            print(fixed_objects)
+            print(" ")
+            print(unassigned)
+            payload = {
+                "acao": "overlay_update",
+                "retangulos": retangulos,
+                "unassigned": unassigned
+            }
+
+           
+        else:
+            #assembly_manager.contar_produtos_posto(detections_roi)
+            fixed_objects = id_manager.check_available_ids(detections_roi)
+            etapa_atual = assembly_manager.gerenciador_etapas(fixed_objects)
+
+            # Envia para o processo HTTP
+            payload = {
+                "acao": "overlay_update",
+                "retangulos": retangulos,
+                "etapa": etapa_atual
+            }
 
         if not output_queue.full():
             output_queue.put(payload)
-        
+            
         if interface_grafica:
             frame_corrigido = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB) 
             cv2.imshow("Hailo PySDK - DigitalDash", frame_corrigido)
 
-            if cv2.waitKey(1) & 0xFF == 27: # ESC
-                break
+        if cv2.waitKey(1) & 0xFF == 27: # ESC
+            break
 
     picam2.stop()
     picam2.close()
