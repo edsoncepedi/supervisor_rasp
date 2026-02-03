@@ -1,4 +1,4 @@
-interface_grafica = True  # Define se a interface gráfica (OpenCV) será usada
+interface_grafica = False  # Define se a interface gráfica (OpenCV) será usada
 
 import os
 if not interface_grafica:
@@ -16,6 +16,9 @@ import time
 from pprint import pprint
 from picamera2 import Picamera2
 from dotenv import load_dotenv
+from queue import Empty, Full
+import aiomqtt
+import asyncio
 
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
@@ -26,10 +29,27 @@ from hailo_postprocess import IDManager
 from assembly_manager import AssemblyManagar
 from assembly_manager import bbox_inside_roi
 
+#BROKER MQTT
+#BROKER = "172.16.10.175"
+BROKER = os.getenv('IP_SERVER')
+PORT = int(os.getenv('PORT_MQTT'))
+POSTO = int(os.getenv("POSTO"))
+
+#PORT = 1883
+
+CMD_TOPIC = f"sistema/camera/posto_{POSTO}"
+
+# ===== estado atual do pipeline =====
+_current = {
+    "queue": None,
+    "stop_event": None,
+    "p_yolo": None,
+    "p_sender": None,
+}
+
 # ================================
 # Configurações Globais (Constantes)
 # ================================
-POSTO = int(os.getenv("POSTO"))
 MODEL_NAME = "digitaldashv3"
 ZOO_PATH = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/digitaldashv3.json"
 LABELS_FILES = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/labels_coco.json"
@@ -70,14 +90,20 @@ def filtrar_detections_por_roi(detections, roi):
 # ==========================================
 # PROCESSO 1: ENVIO VIA HTTP
 # ==========================================
-def process_sender(input_queue, stop_event):
+def process_sender(input_queue, stop_event, start_event):
     print("📡 Processo de envio HTTP iniciado...")
     session = requests.Session()
     intervalo = 1.0 / SEND_FPS
 
     while not stop_event.is_set():
+
+        if not start_event.is_set():
+            time.sleep(0.05)
+            continue
         loop_start = time.time()
         payload = None
+
+
         
         try:
             # Esvazia a fila para pegar apenas o mais recente
@@ -100,8 +126,10 @@ def process_sender(input_queue, stop_event):
 # ==========================================
 # PROCESSO 2: YOLO / HAILO (Processamento de Imagem)
 # ==========================================
-def process_yolo(output_queue, stop_event):
+def process_yolo(output_queue, stop_event, start_event):
     print("⚙️ Inicializando processo YOLO...")
+
+
 
     # --- 1. Inicialização de Objetos (DENTRO DO PROCESSO) ---
     try:
@@ -144,6 +172,11 @@ def process_yolo(output_queue, stop_event):
 
     # --- 3. Loop Principal ---
     while not stop_event.is_set():
+
+
+        if not start_event.is_set():
+            time.sleep(0.05)
+            continue
         # Captura o frame direto como array numpy (já em 640x640)
         # O método capture_array é bloqueante, aguarda o próximo frame
         frame_resized = picam2.capture_array()
@@ -155,8 +188,8 @@ def process_yolo(output_queue, stop_event):
         #frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         # Adiciona batch dimension (1, H, W, C)
         frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
-        frame_resized = cv2.GaussianBlur(frame_rgb, (3, 3), 0)     
-        input_tensor = np.expand_dims(frame_rgb, axis=0)
+        frame_blur = cv2.GaussianBlur(frame_rgb, (3, 3), 0)     
+        input_tensor = np.expand_dims(frame_blur, axis=0)
 
         # Inferência
         try:
@@ -230,7 +263,7 @@ def process_yolo(output_queue, stop_event):
             
             for detect in unassigned_detections:
                 if detect["bbox"] is None:
-                    continues
+                    continue
                 x1, y1, x2, y2 = map(int, detect["bbox"])
                 if (detect["label"] == "cpu" or detect["label"] == "fan"):
                     pad_w = 20
@@ -278,9 +311,14 @@ def process_yolo(output_queue, stop_event):
                 "etapa": etapa_atual
             }
 
-        if not output_queue.full():
-            output_queue.put(payload)
+        #if not output_queue.full():
+        #    output_queue.put(payload)
             
+        try:
+            output_queue.put(payload, timeout=0.01)
+        except Full:
+            # se encheu, descarta (ou você pode fazer "substituir o último")
+            pass
         if interface_grafica:
             frame_corrigido = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB) 
             cv2.imshow("Hailo PySDK - DigitalDash", frame_corrigido)
@@ -294,34 +332,114 @@ def process_yolo(output_queue, stop_event):
         cv2.destroyAllWindows()
     print("🛑 Processo YOLO Encerrado")
 
+"""
 def shutdown_handler(sig, frame):
     print("🛑 SIGTERM recebido, encerrando processos...")
     stop_event.set()
+"""
 
-if __name__ == "__main__":
-    multiprocessing.set_start_method('fork', force=True)
+def start_pipeline():
+    print("🚀 Iniciando pipeline (instância NOVA)")
 
-    fila_dados = multiprocessing.Queue(maxsize=3)
+    fila = multiprocessing.Queue(maxsize=3)
     stop_event = multiprocessing.Event()
+    start_event = multiprocessing.Event()
+    start_event.set()  
 
     p_sender = multiprocessing.Process(
         target=process_sender,
-        args=(fila_dados, stop_event)
+        args=(fila, stop_event, start_event),
+        name="sender"
     )
 
     p_yolo = multiprocessing.Process(
         target=process_yolo,
-        args=(fila_dados, stop_event)
+        args=(fila, stop_event, start_event),
+        name="yolo"
     )
 
-    signal.signal(signal.SIGTERM, shutdown_handler)
-    signal.signal(signal.SIGINT, shutdown_handler)
-
-    print("🚀 Iniciando processos...")
     p_sender.start()
     p_yolo.start()
 
-    p_sender.join()
-    p_yolo.join()
+    _current.update({
+        "queue": fila,
+        "stop_event": stop_event,
+        "p_sender": p_sender,
+        "p_yolo": p_yolo
+    })
 
-    print("✅ Finalizado corretamente")
+def stop_pipeline(force=True):
+    print("🛑 Parando pipeline")
+
+    stop_event = _current.get("stop_event")
+    p_sender = _current.get("p_sender")
+    p_yolo = _current.get("p_yolo")
+
+    if stop_event:
+        stop_event.set()
+
+    for p in (p_sender, p_yolo):
+        if p and p.is_alive():
+            p.join(timeout=2.0)
+
+    if force:
+        for p in (p_sender, p_yolo):
+            if p and p.is_alive():
+                print(f"⚠️ Forçando terminate em {p.name}")
+                p.terminate()
+                p.join(timeout=1.0)
+
+    _current.update({
+        "queue": None,
+        "stop_event": None,
+        "p_sender": None,
+        "p_yolo": None
+    })
+
+    print("✅ Pipeline parado")
+
+def restart_pipeline():
+    stop_pipeline(force=True)
+    start_pipeline()
+
+
+async def mqtt_supervisor():
+    async with aiomqtt.Client(BROKER, PORT) as client:
+        await client.subscribe(CMD_TOPIC)
+        print(f"📡 MQTT escutando: {CMD_TOPIC}")
+
+        async for message in client.messages:
+            try:
+                cmd = message.payload.decode().strip().lower()
+            except Exception:
+                continue
+
+            if cmd == "start":
+                    start_pipeline()
+
+            elif cmd == "stop":
+                stop_pipeline(force=True)
+
+            elif cmd == "restart":
+                restart_pipeline()
+            else:
+                # ignora qualquer coisa diferente
+                pass
+
+
+def main():
+    multiprocessing.set_start_method("fork", force=True)
+
+    def handle_signal(sig, frame):
+        print(f"\n🛑 Sinal {sig} recebido")
+        stop_pipeline(force=True)
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+
+    asyncio.run(mqtt_supervisor())
+
+
+if __name__ == "__main__":
+    main()

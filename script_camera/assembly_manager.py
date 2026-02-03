@@ -44,6 +44,7 @@ class AssemblyManagar:
                     self.etapa_atual+=1
 
             case 5: 
+                
                 print("Posto finalizado ")
 
         return self.etapa_atual
