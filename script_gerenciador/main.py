@@ -51,7 +51,7 @@ GPIO.setup(SENSOR_PALETE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(SENSOR_CORRENTE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(PEDAL, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-GPIO.output(TOMADA_POSTO, GPIO.LOW)
+GPIO.output(TOMADA_POSTO, GPIO.HIGH)
 GPIO.output(BATEDOR_POSTO, GPIO.HIGH)
 
 # --- CALLBACKS MQTT ---
@@ -154,8 +154,8 @@ def checkout():
         else:
             print("Erro ao realizar checkout.")
 
-    except Exception:
-        print(f"Erro ao enviar requisição de checkout: {Exception}")
+    except Exception as e:
+        print(f"Erro ao enviar requisição: {e}")
 
 def verifica_id(tag):
     global URL, POSTO
@@ -172,15 +172,14 @@ def verifica_id(tag):
         if response.ok:
             data = response.json()
             if data.get("autorizado"):
-                print(f"Acesso liberado para: {data['funcionario']['nome']}")
                 set_lamp_state(True)
             else:
                 print("Acesso negado ou tag não reconhecida.")
         else:
             print("Erro na comunicação com o servidor.")
 
-    except Exception:
-        print(f"Erro ao enviar requisição: {Exception}")
+    except Exception as e:
+        print(f"Erro ao enviar requisição: {e}")
 
 def verifica_sensor_indutivo(pino_sensor, cliente):
     """Detecta chegada e saída de palete."""
@@ -242,7 +241,6 @@ try:
         if batedor:
             print("Palete livre")
             if time.time() - tempo_batedor <= 2:
-                print("ai dentro")
                 GPIO.output(BATEDOR_POSTO, GPIO.LOW)
             else:
                 GPIO.output(BATEDOR_POSTO, GPIO.HIGH)
