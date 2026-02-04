@@ -338,20 +338,32 @@ def shutdown_handler(sig, frame):
     stop_event.set()
 """
 
+def pipeline_running():
+    p_yolo = _current.get("p_yolo")
+    p_sender = _current.get("p_sender")
+    return (p_yolo and p_yolo.is_alive()) and (p_sender and p_sender.is_alive())
+
+
 def start_pipeline():
+    # Se já existe pipeline vivo, não inicia outro
+    p_yolo = _current.get("p_yolo")
+    p_sender = _current.get("p_sender")
+    if (p_yolo and p_yolo.is_alive()) or (p_sender and p_sender.is_alive()):
+        print("⚠️ Pipeline já está rodando. Ignorando start.")
+        return
+
     print("🚀 Iniciando pipeline (instância NOVA)")
 
     fila = multiprocessing.Queue(maxsize=3)
     stop_event = multiprocessing.Event()
     start_event = multiprocessing.Event()
-    start_event.set()  
+    start_event.set()
 
     p_sender = multiprocessing.Process(
         target=process_sender,
         args=(fila, stop_event, start_event),
         name="sender"
     )
-
     p_yolo = multiprocessing.Process(
         target=process_yolo,
         args=(fila, stop_event, start_event),
@@ -415,6 +427,7 @@ async def mqtt_supervisor():
                 continue
 
             if cmd == "start":
+                if not pipeline_running():
                     start_pipeline()
 
             elif cmd == "stop":
