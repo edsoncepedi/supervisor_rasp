@@ -1,4 +1,5 @@
 from hailo_postprocess import iou
+
 import math
 
 from collections import Counter
@@ -13,39 +14,51 @@ class AssemblyManagar:
         self.valid3 = False
         #self.etapas_posto1 = {"1":["hand", "cpu"], "2":["cpu", "motherboard"], "3":["hand", "fan"], "4":["fan", "motheboard"]}
         #self.etapas_posto2 = {"1":["hand", "ram"], "2":["hand", "motherboard"], "3":["hand", "ram"], "4":["hand", "motherboard"]}
-        self.iou_threshold = [0.05]
 
+        self.iou_threshold = {
+            "hand_ram": 0.02,
+            "hand_cpu": 0.05,
+            "fan_hand": 0.3,
+            "mb_cpu": 0.03,
+            "mb_fan": 0.1
+        }
+
+        self._iou_cache = {}
 
     def contar_produtos_posto(self, detections):
         contagem = Counter(d["label"] for d in detections)
         #print(contagem) 
+
+
+    def _has_measurement(self, detections):
+        return any(v["active"] for v in detections.values())
     
-        
-    def gerenciador_etapas(self, detections)->int:
-        
+    def update(self, detections: dict):
+        """
+        detections = fixed_objects
+        """
+        self._build_iou_cache(detections)
+
+    # só usa objetos medidos
+        if not self._has_measurement(detections):
+            return self.etapa_atual
+
+        return self._run_fsm(detections)
+
+    def _run_fsm(self, d):
         match self.etapa_atual:
             case 1:
-                if self._verificar_etapa1(detections):
-                    self.etapa_atual+=1
-                
+                if self._etapa1(d):
+                    self.etapa_atual += 1
             case 2:
-                #print("Começa etapa 2")
-                if self._verificar_etapa2(detections):
-                    self.etapa_atual+=1
-
+                if self._etapa2(d):
+                    self.etapa_atual += 1
             case 3:
-                #print("Começa etapa 3")
-                if self._verificar_etapa3(detections):
-                    self.etapa_atual+=1
-
+                if self._etapa3(d):
+                    self.etapa_atual += 1
             case 4:
-                #print("Começa etapa 4")
-                if self._verificar_etapa4(detections):
-                    self.etapa_atual+=1
-
-            case 5: 
-                
-                print("Posto finalizado ")
+                if self._etapa4(d):
+                    self.etapa_atual += 1
 
         return self.etapa_atual
 
@@ -55,152 +68,111 @@ class AssemblyManagar:
         else:
             return False
     
-    def _calcular_iou(self, detections, ClasseA, ClasseB):
-            if self._verificar_boxes_validas(detections, ClasseA) and self._verificar_boxes_validas(detections, ClasseB):
-                return iou(detections[ClasseA]["bbox"],detections[ClasseB]["bbox"] )
-            else:
-                return 0.0
-            
-    def _verificar_etapa1(self, detections)-> bool:
-        if(self.posto == 1):
-            iouA = self._calcular_iou(detections, "hand1", "cpu1")
-            if(iouA> self.iou_threshold[0]):
-                # Realizar algum trigger aqui <----
-                return True
-            iouB = self._calcular_iou(detections, "hand2", "cpu1")
-            if(iouB> self.iou_threshold[0]):
-                # Realizar algum trigger <----
-                return True
-                            
-        elif(self.posto == 2):
-            iouA = self._calcular_iou(detections, "hand1", "ram1")
-            if(iouA> 0.02):
-                # Realizar algum trigger  aqui <----
-                return True
-            iouB = self._calcular_iou(detections, "hand1", "ram2")
-            if(iouB> 0.02):
-                # Realizar algum trigger  aqui <----
-                return True
-            iouC = self._calcular_iou(detections, "hand2", "ram1")
-            if(iouC> 0.02):
-                # Realizar algum trigger  aqui <----
-                return True
-            iouD = self._calcular_iou(detections, "hand2", "ram2")
-            if(iouD> 0.02):
-                # Realizar algum trigger  aqui <----
-                return True
-        else:
-            print("Posto invalido")
+    def _build_iou_cache(self, detections):
+        self._iou_cache.clear()
+
+        keys = [k for k, v in detections.items() if v["active"] and v["bbox"]]
+
+        for i in range(len(keys)):
+            for j in range(i + 1, len(keys)):
+                a, b = keys[i], keys[j]
+                self._iou_cache[(a, b)] = iou(detections[a]["bbox"],
+                                            detections[b]["bbox"])
+
+
+    def _iou(self, a, b):
+        return self._iou_cache.get((a, b), self._iou_cache.get((b, a), 0.0))
+
+    def _etapa1(self, d) -> bool:
+        if self.posto == 1:
+            return (self._iou("hand1", "cpu1") > self.iou_threshold["hand_cpu"] or
+                    self._iou("hand2", "cpu1") > self.iou_threshold["hand_cpu"])
+
+        elif self.posto == 2:
+            thr = self.iou_threshold["hand_ram"]
+            return (self._iou("hand1", "ram1") > thr or
+                    self._iou("hand1", "ram2") > thr or
+                    self._iou("hand2", "ram1") > thr or
+                    self._iou("hand2", "ram2") > thr)
+
         return False
 
-    def _verificar_etapa2(self, detections)->bool:
-        if(self.posto == 1):
-            iouA = self._calcular_iou(detections, "motherboard1", "cpu1")
-            iouB = self._calcular_iou(detections, "motherboard1", "hand1")
-            iouC = self._calcular_iou(detections, "motherboard1", "hand2")
-            if(iouA>0.03 and iouB == 0.0 and iouC == 0.0):
-                return True
-            
-        elif(self.posto == 2):
-            ## Parte 1
-            iouA = self._calcular_iou(detections, "motherboard1", "hand1")
-            iouB = self._calcular_iou(detections, "motherboard1", "hand2")
-            if(not self.valid2):
-                if (detections["ram1"]["active"] and iouA>0.1 and iouB>0.1 and not detections["ram2"]["active"]):
-                    self.valid2 = True
+    def _etapa2(self, d) -> bool:
+        if self.posto == 1:
+            iou_mb_cpu = self._iou("motherboard1", "cpu1")
+            iou_mb_h1  = self._iou("motherboard1", "hand1")
+            iou_mb_h2  = self._iou("motherboard1", "hand2")
+            return (iou_mb_cpu > self.iou_threshold["mb_cpu"] and iou_mb_h1 == 0.0 and iou_mb_h2 == 0.0)
 
-                if (detections["ram2"]["active"] and iouA>0.1 and iouB>0. and not detections["ram1"]["active"]):
+        elif self.posto == 2:
+            iouA = self._iou("motherboard1", "hand1")
+            iouB = self._iou("motherboard1", "hand2")
+
+            if not self.valid2:
+       
+                if (d["ram1"]["active"] and iouA > 0.1 and iouB > 0.1 and not d["ram2"]["active"]):
                     self.valid2 = True
-            
-            if(self.valid2):
-            ## Parte 2
-                if (detections["ram1"]["active"] and iouA==0 and iouB==0 and not detections["ram2"]["active"]):
+                    return False
+                if (d["ram2"]["active"] and iouA > 0.1 and iouB > 0.1 and not d["ram1"]["active"]):
+                    self.valid2 = True
+                    return False
+
+            else:
+                if iouA == 0.0 and iouB == 0.0:
                     self.valid2 = False
                     return True
-                if (detections["ram2"]["active"] and iouA==0 and iouB==0 and not detections["ram1"]["active"]):
-                    self.valid2 = False
-                    return True
-    
-        else:
-            print("Posto invalido")
         return False
 
-    def _verificar_etapa3(self, detections):
-        if(self.posto == 1):
-            iouA = self._calcular_iou(detections, "fan1", "hand1")
-            print(iouA)
-            if(iouA> 0.3):
-                #print("Mão 1 segurando CPU")
-                # Realizar algum trigger  agui <----
-                return True
-            
-            iouB = self._calcular_iou(detections, "fan1", "hand2")
-            print(iouB)
-            if(iouB> 0.3):
-                #print("Mão 1 segurando CPU")
-                # Realizar algum trigger  agui <----
-                return True
-        elif(self.posto == 2):
-            if (detections["ram1"]["active"] and detections["ram2"]["active"]):
-                    self.etapa_atual =2
-            iouA = self._calcular_iou(detections, "hand1", "ram1")
-            if(iouA> 0.02):
-                # Realizar algum trigger  agui <----
-                return True
-            iouB = self._calcular_iou(detections, "hand1", "ram2")
-            if(iouB> 0.02):
-                # Realizar algum trigger  agui <----
-                return True
-            iouC = self._calcular_iou(detections, "hand2", "ram1")
-            if(iouC> 0.02):
-                # Realizar algum trigger  agui <----
-                return True
-            iouD = self._calcular_iou(detections, "hand2", "ram2")
-            if(iouD> 0.02):
-                # Realizar algum trigger  agui <----
-                return True
-        else:
-            print("Posto invalido")
-        return False
 
-    def _verificar_etapa4(self, detections):
-        if(self.posto == 1):
-            iouA = self._calcular_iou(detections, "motherboard1", "fan1")
-            iouB = self._calcular_iou(detections, "motherboard1", "hand1")
-            iouC = self._calcular_iou(detections, "motherboard1", "hand2")        
-            print(iouA)
+    def _etapa3(self, d) -> bool:
+        if self.posto == 1:
+            thr = self.iou_threshold["fan_hand"]
+            return (self._iou("fan1", "hand1") > thr or self._iou("fan1", "hand2") > thr)
 
-            if(iouA>0.1 and iouB == 0.0 and iouC == 0.0):
-                return True
-            else:
-                return False
-            
-        elif(self.posto == 2):
-
-            if (detections["ram1"]["active"] and detections["ram2"]["active"]):
+        elif self.posto == 2:
+            # mantém seu reset de etapa
+            if d["ram1"]["active"] and d["ram2"]["active"]:
                 self.etapa_atual = 2
                 return False
-            
-            ## Parte 1
-            iouA = self._calcular_iou(detections, "motherboard1", "hand1")
-            iouB = self._calcular_iou(detections, "motherboard1", "hand2")
-            if(not self.valid3):
-                if (not detections["ram1"]["active"] and iouA>0.1 and iouB>0.1 and not detections["ram2"]["active"]):
-                    self.valid3 = True
 
-            
-            if(self.valid3):
-            ## Parte 2
-                if (not detections["ram1"]["active"] and iouA==0 and iouB==0 and not detections["ram2"]["active"]):
-                    self.valid3 = False
-                    return True
-            
-        else:
-            print("Posto invalido")
+            thr = self.iou_threshold["hand_ram"]
+            return (self._iou("hand1", "ram1") > thr or
+                    self._iou("hand1", "ram2") > thr or
+                    self._iou("hand2", "ram1") > thr or
+                    self._iou("hand2", "ram2") > thr)
+
         return False
 
 
-def bbox_inside_roi(bbox, roi, min_overlap=0.3):
+    def _etapa4(self, d) -> bool:
+        if self.posto == 1:
+            iou_mb_fan = self._iou("motherboard1", "fan1")
+            iou_mb_h1  = self._iou("motherboard1", "hand1")
+            iou_mb_h2  = self._iou("motherboard1", "hand2")
+            return (iou_mb_fan > self.iou_threshold["mb_fan"] and iou_mb_h1 == 0.0 and iou_mb_h2 == 0.0)
+
+        elif self.posto == 2:
+            if d["ram1"]["active"] and d["ram2"]["active"]:
+                self.etapa_atual = 3
+                return False
+
+            iouA = self._iou("motherboard1", "hand1")
+            iouB = self._iou("motherboard1", "hand2")
+
+            if not self.valid3:
+                if (not d["ram1"]["active"] and iouA > 0.1 and iouB > 0.1 and not d["ram2"]["active"]):
+                    self.valid3 = True
+                    return False
+            else:
+                if iouA == 0.0 and iouB == 0.0:
+                    self.valid3 = False
+                    return True
+
+        return False
+
+
+
+def bbox_inside_roi(bbox, roi, min_overlap=0.1):
     x1, y1, x2, y2 = bbox
     rx1, ry1, rx2, ry2 = roi["x1"], roi["y1"], roi["x2"], roi["y2"]
 

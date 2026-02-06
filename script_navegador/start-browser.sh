@@ -31,8 +31,8 @@ URL_MONITOR_1="http://$IP_SERVER:$PORT_SERVER/posto/$POSTO"
 URL_MONITOR_2="http://$IP_SERVER:$PORT_FRONTEND/?posto=$POSTO"
 
 # Resolução dos monitores (AJUSTE SE NECESSÁRIO)
-MONITOR_WIDTH=1920
-MONITOR_HEIGHT=1080
+MONITOR_WIDTH=1280
+MONITOR_HEIGHT=720
 
 # ---------------- MONITOR 1 ----------------
 /usr/bin/chromium \
@@ -43,6 +43,7 @@ MONITOR_HEIGHT=1080
   --kiosk \
   --no-first-run \
   --disable-gpu \
+  --force-device-scale-factor=0.8 \
   --window-position=0,0 \
   --window-size=${MONITOR_WIDTH},${MONITOR_HEIGHT} \
   "$URL_MONITOR_1" &
@@ -58,6 +59,7 @@ sleep 1
   --kiosk \
   --no-first-run \
   --disable-gpu \
+  --force-device-scale-factor=0.8 \
   --window-position=${MONITOR_WIDTH},0 \
   --window-size=${MONITOR_WIDTH},${MONITOR_HEIGHT} \
   "$URL_MONITOR_2"

@@ -1,9 +1,6 @@
 interface_grafica = False  # Define se a interface gráfica (OpenCV) será usada
 
 import os
-if not interface_grafica:
-    os.environ["QT_QPA_PLATFORM"] = "offscreen"
-
 import signal
 import cv2
 import numpy as np
@@ -55,7 +52,12 @@ ZOO_PATH = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/dig
 LABELS_FILES = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/labels_coco.json"
 CAMERA_ID = 0
 SERVER_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/camera/{POSTO}"
-SEND_FPS = 30  # Taxa de envio para o servidor
+SEND_FPS = 20  # Taxa de envio para o servidor
+
+# FPS Camera
+PROCESS_FPS =20
+
+FRAME_TIME = 1.0 / PROCESS_FPS
 
 MODEL_W = 640
 MODEL_H = 640
@@ -102,9 +104,6 @@ def process_sender(input_queue, stop_event, start_event):
             continue
         loop_start = time.time()
         payload = None
-
-
-        
         try:
             # Esvazia a fila para pegar apenas o mais recente
             while not input_queue.empty():
@@ -117,7 +116,7 @@ def process_sender(input_queue, stop_event, start_event):
                 session.post(SERVER_URL, json=payload, timeout=0.2)
             except requests.exceptions.RequestException:
                 pass 
-        
+
         elapsed = time.time() - loop_start
         wait = intervalo - elapsed
         if wait > 0:
@@ -127,15 +126,17 @@ def process_sender(input_queue, stop_event, start_event):
 # PROCESSO 2: YOLO / HAILO (Processamento de Imagem)
 # ==========================================
 def process_yolo(output_queue, stop_event, start_event):
+
     print("⚙️ Inicializando processo YOLO...")
-
-
-
+    
     # --- 1. Inicialização de Objetos (DENTRO DO PROCESSO) ---
     try:
         id_manager = IDManager()
         assembly_manager = AssemblyManagar(posto=POSTO) 
-        
+
+        if not interface_grafica:
+            os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
         print(f"📂 Carregando modelo: {ZOO_PATH}")
         model = dg.load_model(
             model_name=MODEL_NAME,
@@ -146,29 +147,33 @@ def process_yolo(output_queue, stop_event, start_event):
         )
         print("✅ Modelo Hailo carregado com sucesso!")
 
-        # Carrega Labels UMA VEZ só
+        # Carrega labels
         with open(LABELS_FILES, "r") as json_file:
             label_dictionary = json.load(json_file)
-        print("✅ Labels carregadas.")
 
     except Exception as e:
         print(f"❌ Erro crítico na inicialização do modelo/classes: {e}")
         return
+    
     # ================================
     # Configurar Câmera (Picamera2)
     # ================================
     print("📷 Iniciando Raspberry Pi AI Camera...")
     picam2 = Picamera2()
-
-    # Configura a câmera para já entregar 640x640 em formato BGR (compatível com OpenCV)
     config = picam2.create_video_configuration(
-        main={"size": (MODEL_W, MODEL_H), "format": "RGB888"}
+        main={"size": (MODEL_W, MODEL_H), "format": "RGB888"},
+        controls={"FrameRate": PROCESS_FPS}
     )
-
     picam2.configure(config)
     picam2.start()
 
     print("✅ Câmera iniciada!")
+
+    # Controle fps e frame
+    frame_count = 0
+    frame_id = 0
+
+    t0 = time.perf_counter()
 
     # --- 3. Loop Principal ---
     while not stop_event.is_set():
@@ -177,41 +182,50 @@ def process_yolo(output_queue, stop_event, start_event):
         if not start_event.is_set():
             time.sleep(0.05)
             continue
-        # Captura o frame direto como array numpy (já em 640x640)
-        # O método capture_array é bloqueante, aguarda o próximo frame
-        frame_resized = picam2.capture_array()
 
-        # O redimensionamento manual (cv2.resize) foi removido pois 
-        # a câmera já está entregando no tamanho certo.
-        #frame_resized = cv2.resize(frame, (640, 640))
-        # Converte BGR (OpenCV) para RGB (Modelo)
-        #frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        # Adiciona batch dimension (1, H, W, C)
-        frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
+        loop_start = time.perf_counter() # Controle FPS
+        # Captura o frame direto como array numpy (já em 640x640)
+        
+        frame = picam2.capture_array()
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frame_blur = cv2.GaussianBlur(frame_rgb, (3, 3), 0)     
         input_tensor = np.expand_dims(frame_blur, axis=0)
 
         # Inferência
-        try:
-            result = model(input_tensor)
-        except dg.exceptions.DegirumException as e:
-            print("❌ Erro na inferência Hailo:", e)
-            continue # Tenta próximo frame em vez de crashar
-        
-        # Pós-processamento
-        detections = postprocess_detection_results(
-            result.results[0]["data"], 
-            model.input_shape[0], 
-            6, 
-            label_dictionary,
-            confidence_threshold=0.3
-        )
-        
-        detections_roi = filtrar_detections_por_roi(detections, ROI)
 
-        #assembly_manager.contar_produtos_posto(detections_roi)
-        fixed_objects = id_manager.check_available_ids(detections_roi)
-        
+        frame_id += 1
+        do_predict_only  = (frame_id % 3 == 0)
+
+        all_tracks = []
+
+        if not do_predict_only :
+            
+            try:
+                result = model(input_tensor)
+            except dg.exceptions.DegirumException as e:
+                print("❌ Erro na inferência Hailo:", e)
+                continue # Tenta próximo frame em vez de crashar
+            
+            # Pós-processamento
+            detections = postprocess_detection_results(
+                result.results[0]["data"], 
+                model.input_shape[0], 
+                6, 
+                label_dictionary,
+                confidence_threshold=0.3
+            )
+
+            detections_roi = filtrar_detections_por_roi(detections, ROI)
+            all_tracks = id_manager.assign_tracks_all_classes(detections_roi)
+            fixed_objects = id_manager.check_available_ids_from_tracks(all_tracks)
+
+
+        else:
+            fixed_objects = id_manager.predict_only()
+
+        if fixed_objects is None:
+            continue
+
         # Desenho e Preparação do Payload
         retangulos = []
         for fid, obj in fixed_objects.items():
@@ -243,19 +257,18 @@ def process_yolo(output_queue, stop_event, start_event):
                 "mostra": True
             })
             if interface_grafica:
-                cv2.rectangle(frame_resized, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(frame_resized, f"{fid}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                cv2.rectangle(frame_rgb, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame_rgb, f"{fid}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
         if interface_grafica:
-            cv2.rectangle(frame_resized, (ROI["x1"], ROI["y1"]), (ROI["x2"], ROI["y2"]), (255, 255, 0), 2)
+            cv2.rectangle(frame_rgb, (ROI["x1"], ROI["y1"]), (ROI["x2"], ROI["y2"]), (255, 255, 0), 2)
 
-        # Lógica de Negócio
+        # Lógica de posto
         if POSTO == 0:
-
-            all_detections = id_manager.assign_id_to_label(detections_roi)
-            #print(all_detections)
-            
-            unassigned_detections  = id_manager.get_unassigned_tracks(all_detections,fixed_objects)
+            if not do_predict_only:
+                unassigned_detections = id_manager.get_unassigned_tracks_stable(all_tracks, fixed_objects)
+            else:
+                unassigned_detections = []
             unassigned = []
             
             
@@ -286,8 +299,8 @@ def process_yolo(output_queue, stop_event, start_event):
                 })
 
                 if interface_grafica:
-                    cv2.rectangle(frame_resized, (x1, y1), (x2, y2), color, 2)
-                    cv2.putText(frame_resized, detect["label"], (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                    cv2.rectangle(frame_rgb, (x1, y1), (x2, y2), color, 2)
+                    cv2.putText(frame_rgb, detect["label"], (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
             # Envia para o processo HTTP
             print(fixed_objects)
             print(" ")
@@ -301,9 +314,8 @@ def process_yolo(output_queue, stop_event, start_event):
            
         else:
             #assembly_manager.contar_produtos_posto(detections_roi)
-            fixed_objects = id_manager.check_available_ids(detections_roi)
-            etapa_atual = assembly_manager.gerenciador_etapas(fixed_objects)
-
+            etapa_atual = assembly_manager.update(fixed_objects)
+        
             # Envia para o processo HTTP
             payload = {
                 "acao": "overlay_update",
@@ -313,24 +325,35 @@ def process_yolo(output_queue, stop_event, start_event):
 
         #if not output_queue.full():
         #    output_queue.put(payload)
-            
+        
         try:
             output_queue.put(payload, timeout=0.01)
         except Full:
             # se encheu, descarta (ou você pode fazer "substituir o último")
             pass
+
+        # Controle FPS
+        elapsed = time.perf_counter() - loop_start
+        sleep_time = FRAME_TIME - elapsed
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
+
         if interface_grafica:
-            frame_corrigido = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB) 
-            cv2.imshow("Hailo PySDK - DigitalDash", frame_corrigido)
+            cv2.imshow("Hailo PySDK - DigitalDash", frame_rgb)
 
-        if cv2.waitKey(1) & 0xFF == 27: # ESC
-            break
+            if cv2.waitKey(1) & 0xFF == 27: # ESC
+                break
 
+
+    print("🛑 Processo YOLO Encerrado")
     picam2.stop()
     picam2.close()
     if interface_grafica:
         cv2.destroyAllWindows()
-    print("🛑 Processo YOLO Encerrado")
+    
+
+
 
 """
 def shutdown_handler(sig, frame):

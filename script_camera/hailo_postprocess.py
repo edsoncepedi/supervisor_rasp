@@ -1,7 +1,8 @@
 import numpy as np
-from sort import Sort
+from sort_core import Sort
 import re
 import copy
+from collections import defaultdict
 
 def postprocess_detection_results(detection_output, input_shape, num_classes, label_dictionary, confidence_threshold=0.3):
     """
@@ -79,6 +80,7 @@ def postprocess_detection_results(detection_output, input_shape, num_classes, la
 
 
 
+
 def iou( boxA, boxB):
     # função IoU simples
     xA = max(boxA[0], boxB[0])
@@ -91,6 +93,33 @@ def iou( boxA, boxB):
     boxBArea = (boxB[2]-boxB[0]) * (boxB[3]-boxB[1])
 
     return interArea / float(boxAArea + boxBArea - interArea + 1e-6)
+
+def iou_matrix_np(dets_xyxy, trks_xyxy):
+    """
+    dets_xyxy: (D,4)
+    trks_xyxy: (T,4)
+    return: (T,D) IoU
+    """
+    if dets_xyxy.size == 0 or trks_xyxy.size == 0:
+        return np.zeros((trks_xyxy.shape[0], dets_xyxy.shape[0]), dtype=np.float32)
+
+    # Expand dims p/ broadcast
+    d = dets_xyxy[None, :, :]   # (1,D,4)
+    t = trks_xyxy[:, None, :]   # (T,1,4)
+
+    xx1 = np.maximum(t[..., 0], d[..., 0])
+    yy1 = np.maximum(t[..., 1], d[..., 1])
+    xx2 = np.minimum(t[..., 2], d[..., 2])
+    yy2 = np.minimum(t[..., 3], d[..., 3])
+
+    w = np.maximum(0.0, xx2 - xx1)
+    h = np.maximum(0.0, yy2 - yy1)
+    inter = w * h
+
+    area_t = (t[..., 2] - t[..., 0]) * (t[..., 3] - t[..., 1])
+    area_d = (d[..., 2] - d[..., 0]) * (d[..., 3] - d[..., 1])
+
+    return inter / (area_t + area_d - inter + 1e-6)
 
 
 
@@ -112,144 +141,110 @@ class IDManager:
         
         self.fixed_objects = {}
         self.last_fixed_objects = {}
-
-        for obj_class, count in self.fixed_ids.items():
-            for i in range(1, count + 1):
-                fid = f"{obj_class}{i}"
-
-                self.fixed_objects[fid] = {
-                    "class": obj_class,
-                    "bbox": None,
-                    "track_id": None,
-                    "active": False
-                }
+        self.miss_counter = {}          # fixed_id -> frames sem atualização
+        self.max_miss_frames = 3        # ajuste (2~5 é bom)
+        for cls, count in self.fixed_ids.items():
+            for i in range(1, count+1):
+                fid = f"{cls}{i}"
+                self.fixed_objects[fid] = {"class": cls, "bbox": None, "track_id": None, "active": False}
+                self.miss_counter[fid] = 0
 
         # dict do sort associado a IDs fixos 
         self.sort_to_fixed = {}
 
-        self.tracker = Sort(
-            max_age=200,
-            min_hits=3,
-            iou_threshold=0.3
-        )       
-        
-    def assign_id_to_label(self, detections):
+        self.unassigned_cache = {}  # track_id -> dict
+        self.UNASSIGNED_MIN_HITS = 3
+        self.UNASSIGNED_MAX_MISS = 4
+        self.UNASSIGNED_ALPHA = 0.4
 
-        sort_input = []
+        self.trackers_by_class = {
+            "hand": Sort(max_age=50, min_hits=1, iou_threshold=0.15),
+            "ram":  Sort(max_age=50, min_hits=1, iou_threshold=0.2),
+            "cpu":  Sort(max_age=50, min_hits=1, iou_threshold=0.2),
+            "motherboard": Sort(max_age=50, min_hits=1, iou_threshold=0.2),
+            "fan":  Sort(max_age=50, min_hits=1, iou_threshold=0.2),
+            "pallet": Sort(max_age=50, min_hits=1, iou_threshold=0.2),
 
-        # Preparar entrada do SORT
-        for det in detections:
-            x1, y1, x2, y2 = map(float, det["bbox"])
-            score = float(det["score"])
-            sort_input.append([x1, y1, x2, y2, score])
-
-        sort_input = np.array(sort_input) if len(sort_input) > 0 else np.empty((0, 5))
-
-        # Atualizar SORT
-        self.tracks = self.tracker.update(sort_input)
-
-        sort_with_label = []
-
-        # Associar track ↔ label via IOU
-        for track in self.tracks:
-            tx1, ty1, tx2, ty2, track_id = track
-            track_bbox = [tx1, ty1, tx2, ty2]
-
-            best_iou = 0.0
-            best_label = None
-
-            for det in detections:
-                det_bbox = det["bbox"]
-                i = iou(det_bbox, track_bbox)
-
-                if i > best_iou:
-                    best_iou = i
-                    best_label = det["label"]
-
-            # Aceita associação ou mantém track sem label
-
-            sort_with_label.append({
-                "track_id": int(track_id),
-                "bbox": track_bbox,
-                "label": best_label if best_iou >= self.iou_assign_threshold else None
-            })
-                    
-
-
-        return sort_with_label
-    def get_unassigned_tracks(self, detections, fixed_ids):
-        unassigned = []
-        fixed_track_ids = {
-            slot["track_id"]
-            for slot in fixed_ids.values()
-            if slot.get("track_id") is not None
         }
 
-        for item in detections:
-            track_id = item['track_id']
-            x1, y1, x2, y2 = item['bbox']
-            label = item['label']
+        self.topk = {"hand":2, "ram":4, "cpu":3, "motherboard":3, "fan":3, "pallet":3}
 
-            if track_id not in fixed_track_ids:
-                unassigned.append({
-                    "track_id": track_id,
-                    "bbox": [x1, y1, x2, y2],
-                    "label": label
-                })
+        self.tracks = []  # guarda tracks do frame (para cleanup)
 
-        return unassigned
+    def _free_fixed_id(self, fixed_id: str):
+        """Libera um fixed_id e remove qualquer sort_id que esteja mapeado nele."""
+        # remove sort_id -> fixed_id
+        for sid, fid in list(self.sort_to_fixed.items()):
+            if fid == fixed_id:
+                del self.sort_to_fixed[sid]
 
+        obj = self.fixed_objects[fixed_id]
+        obj["active"] = False
+        obj["bbox"] = None
+        obj["track_id"] = None
+        obj["source"] = None if "source" in obj else obj.get("source")
+        self.miss_counter[fixed_id] = 0
 
+    def _build_sort_input(self, dets_cls, k):
+        # dets_cls: lista de dets já da classe
+        if not dets_cls:
+            return np.empty((0,5), dtype=np.float32)
 
-        
-    def _cleanup_dead_tracks(self):
-        active_sort_ids = {int(track[-1]) for track in self.tracks}
+        # top-k por score
+        dets_cls = sorted(dets_cls, key=lambda d: d["score"], reverse=True)[:k]
+        arr = np.array([[*d["bbox"], d["score"]] for d in dets_cls], dtype=np.float32)
+        return arr
 
-        for sort_id in list(self.sort_to_fixed.keys()):
-            if sort_id not in active_sort_ids:
-                fixed_id = self.sort_to_fixed[sort_id]
+    def assign_tracks_all_classes(self, detections):
+        by_cls = defaultdict(list)
+        for det in detections:
+            lbl = det["label"]
+            if lbl in self.trackers_by_class:
+                by_cls[lbl].append(det)
 
-                # libera o ID
-                self.fixed_objects[fixed_id]["active"] = False
-                self.fixed_objects[fixed_id]["track_id"] = None
-                self.fixed_objects[fixed_id]["bbox"] = None
+        all_tracks = []  # saída unificada: track_id,bbox,label
+        self.tracks = [] # para cleanup: lista de track_ids ativos globais
 
-                del self.sort_to_fixed[sort_id]
+        for cls, tracker in self.trackers_by_class.items():
+            sort_in = self._build_sort_input(by_cls.get(cls, []), self.topk.get(cls, 1))
+            trks = tracker.update(sort_in)  # [[x1,y1,x2,y2,id],...]
 
+            for t in trks:
+                x1,y1,x2,y2,tid = t
+                tid = int(tid)
 
-    def check_available_ids(self, detections):
+                # ⚠️ IDs repetem entre classes, então faça um ID global barato:
+                # combine classe + tid em uma string (ou hash int)
+                global_id = f"{cls}:{tid}"
 
+                all_tracks.append({"track_id": global_id, "bbox":[float(x1),float(y1),float(x2),float(y2)], "label": cls})
+                self.tracks.append(global_id)
+
+        return all_tracks
+
+    def check_available_ids_from_tracks(self, labels_with_id):
+        # NÃO roda SORT aqui. Só usa a lista labels_with_id.
         self.last_fixed_objects = copy.deepcopy(self.fixed_objects)
 
         for fid in self.fixed_objects:
             self.fixed_objects[fid]["active"] = False
 
-        labels_with_id = self.assign_id_to_label(detections)
-
         for item in labels_with_id:
-            sort_id = item["track_id"]
-            bbox = item["bbox"]
-            label = item["label"]
+            sort_id = item["track_id"]   # ex: "ram:3"
+            bbox    = item["bbox"]
+            label   = item["label"]
 
             if label is None:
                 continue
 
-            # SORT já tinha fixed_id  reutiliza
             if sort_id in self.sort_to_fixed:
                 fixed_id = self.sort_to_fixed[sort_id]
-
             else:
-                # 2SORT novo  tenta pegar ID livre
                 fixed_id = self._assign_new_fixed_id(label)
-
                 if fixed_id is None:
-                    
-                    #print(f" Classe '{label}' sem IDs disponíveis")
                     continue
-
                 self.sort_to_fixed[sort_id] = fixed_id
 
-            # Atualiza estado
             obj = self.fixed_objects[fixed_id]
             obj["bbox"] = bbox
             obj["track_id"] = sort_id
@@ -257,6 +252,73 @@ class IDManager:
 
         self._cleanup_dead_tracks()
         return self.fixed_objects
+
+
+
+
+        
+    def _cleanup_dead_tracks(self):
+        active_sort_ids = set(self.tracks)
+        for sort_id in list(self.sort_to_fixed.keys()):
+            if sort_id not in active_sort_ids:
+                fixed_id = self.sort_to_fixed[sort_id]
+                obj = self.fixed_objects[fixed_id]
+                obj["active"] = False
+                obj["track_id"] = None
+                obj["bbox"] = None
+                del self.sort_to_fixed[sort_id]
+
+
+
+    def check_available_ids(self, detections):
+        # não use deepcopy todo frame (custa). Se precisar, deixe, mas não é essencial.
+        # self.last_fixed_objects = copy.deepcopy(self.fixed_objects)
+
+        # marca todo mundo como "não atualizado neste frame"
+        updated_fixed = set()
+
+        labels_with_id = self.assign_tracks_all_classes(detections)
+
+        for item in labels_with_id:
+            sort_id = item["track_id"]
+            bbox = item["bbox"]
+            label = item["label"]
+            if label is None:
+                continue
+
+            # reutiliza mapping
+            if sort_id in self.sort_to_fixed:
+                fixed_id = self.sort_to_fixed[sort_id]
+            else:
+                fixed_id = self._assign_new_fixed_id(label)
+                if fixed_id is None:
+                    continue
+                self.sort_to_fixed[sort_id] = fixed_id
+
+            obj = self.fixed_objects[fixed_id]
+            obj["bbox"] = bbox
+            obj["track_id"] = sort_id
+            obj["active"] = True
+
+            self.miss_counter[fixed_id] = 0         # ✅ reset miss
+            updated_fixed.add(fixed_id)
+
+        # ✅ histerese: quem não foi atualizado, incrementa miss
+        for fid, obj in self.fixed_objects.items():
+            if fid not in updated_fixed:
+                self.miss_counter[fid] += 1
+                if self.miss_counter[fid] >= self.max_miss_frames:
+                    self._free_fixed_id(fid)
+
+            else:
+                obj["active"] = True  # mantém ativo
+
+        # ❗️NÃO remova sort_to_fixed agressivamente aqui.
+        # Deixe o miss_counter decidir quando matar.
+        # self._cleanup_dead_tracks()  # <- comente/remova
+
+        return self.fixed_objects
+
         
     def _assign_new_fixed_id(self, label):
         """
@@ -275,4 +337,127 @@ class IDManager:
 
         # Nenhum ID disponível para a classe
         return None
+    
+
+    def predict_only(self):
+        updated_fixed = set()
+
+        for cls, tracker in self.trackers_by_class.items():
+            tracker.update(np.empty((0, 5), dtype=np.float32))  # advance kalman
+
+            for trk in tracker.trackers:
+                tid = int(trk.id + 1)            # ID compatível com Sort.update()
+                sort_id = f"{cls}:{tid}"
+
+                if sort_id not in self.sort_to_fixed:
+                    continue
+
+                fixed_id = self.sort_to_fixed[sort_id]
+
+                d = trk.get_state()[0]
+                bbox = [float(d[0]), float(d[1]), float(d[2]), float(d[3])]
+
+                obj = self.fixed_objects[fixed_id]
+                obj["bbox"] = bbox
+                obj["track_id"] = sort_id
+                obj["active"] = True
+
+                self.miss_counter[fixed_id] = 0
+                updated_fixed.add(fixed_id)
+
+        # histerese para os que não foram atualizados
+        for fid, obj in self.fixed_objects.items():
+            if fid not in updated_fixed:
+                self.miss_counter[fid] += 1
+                if self.miss_counter[fid] >= self.max_miss_frames:
+                    self._free_fixed_id(fid)
+
+        return self.fixed_objects
+
+
+    def get_unassigned_tracks(self, all_tracks, fixed_objects):
+        """
+        all_tracks: lista de dicts -> [{"track_id": "ram:3", "bbox":[...], "label":"ram"}, ...]
+        fixed_objects: dict -> {"ram1": {"track_id":"ram:3", ...}, ...}
+
+        Retorna tracks que NÃO foram associados a nenhum fixed_id.
+        """
+        used_track_ids = {
+            obj["track_id"]
+            for obj in fixed_objects.values()
+            if obj.get("track_id") is not None
+        }
+
+        unassigned = []
+        for t in all_tracks:
+            tid = t.get("track_id")
+            if tid is None:
+                continue
+            if tid not in used_track_ids:
+                unassigned.append({
+                    "track_id": tid,
+                    "bbox": t.get("bbox"),
+                    "label": t.get("label")
+                })
+
+        return unassigned
+    
+
+
+    def get_unassigned_tracks_stable(self, all_tracks, fixed_objects):
+        fixed_track_ids = {
+            slot["track_id"] for slot in fixed_objects.values()
+            if slot.get("track_id") is not None
+        }
+
+        current_unassigned = {}
+        for item in all_tracks:
+            tid = item["track_id"]
+            if tid in fixed_track_ids:
+                continue
+            current_unassigned[tid] = item  # bbox/label
+
+        # marca misses
+        for tid in list(self.unassigned_cache.keys()):
+            if tid not in current_unassigned:
+                self.unassigned_cache[tid]["miss"] += 1
+                if self.unassigned_cache[tid]["miss"] > self.UNASSIGNED_MAX_MISS:
+                    del self.unassigned_cache[tid]
+
+        # atualiza hits
+        for tid, item in current_unassigned.items():
+            bbox = item["bbox"]
+            label = item["label"]
+
+            if tid not in self.unassigned_cache:
+                self.unassigned_cache[tid] = {
+                    "track_id": tid,
+                    "label": label,
+                    "bbox": bbox,
+                    "hits": 1,
+                    "miss": 0
+                }
+            else:
+                u = self.unassigned_cache[tid]
+                u["miss"] = 0
+                u["hits"] += 1
+                # EMA bbox
+                a = self.UNASSIGNED_ALPHA
+                u["bbox"] = [
+                    a*bbox[i] + (1-a)*u["bbox"][i] for i in range(4)
+                ]
+                u["label"] = label
+
+        # só retorna os estáveis
+        out = []
+        for u in self.unassigned_cache.values():
+            if u["hits"] >= self.UNASSIGNED_MIN_HITS:
+                out.append({"track_id": u["track_id"], "bbox": u["bbox"], "label": u["label"]})
+        return out
+
+
+
+
+
+
 
