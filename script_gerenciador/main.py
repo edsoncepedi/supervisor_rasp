@@ -192,6 +192,7 @@ def verifica_sensor_indutivo(pino_sensor, cliente):
         if estado_atual == GPIO.LOW:
             print("Chegou palete")
             #cliente.publish(TOPIC_ENVIO_ESP, "Chegou palete")
+            cliente.publish(TOPIC_ENVIO_ESP, "BS")
         else:
             print("Palete removido")
             cliente.publish(TOPIC_ENVIO_ESP, "BD")

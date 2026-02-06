@@ -55,7 +55,7 @@ SERVER_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/came
 SEND_FPS = 20  # Taxa de envio para o servidor
 
 # FPS Camera
-PROCESS_FPS =20
+PROCESS_FPS =15
 
 FRAME_TIME = 1.0 / PROCESS_FPS
 
@@ -63,9 +63,10 @@ MODEL_W = 640
 MODEL_H = 640
 
 # ROI: x, y, largura, altura
-ROI_X = 0
-ROI_Y = 230
-ROI_W = 550
+ROI_X = 35
+ROI_Y = 211
+
+ROI_W = 535
 ROI_H = 300
 
 ROI = {
@@ -265,10 +266,15 @@ def process_yolo(output_queue, stop_event, start_event):
 
         # Lógica de posto
         if POSTO == 0:
+
             if not do_predict_only:
-                unassigned_detections = id_manager.get_unassigned_tracks_stable(all_tracks, fixed_objects)
+                unassigned_detections = id_manager.get_unassigned_tracks(all_tracks, fixed_objects)
+                last_unassigned_detections = unassigned_detections
             else:
-                unassigned_detections = []
+                if last_unassigned_detections:
+                    unassigned_detections = last_unassigned_detections
+                else:
+                    unassigned_detections = []
             unassigned = []
             
             
@@ -315,7 +321,7 @@ def process_yolo(output_queue, stop_event, start_event):
         else:
             #assembly_manager.contar_produtos_posto(detections_roi)
             etapa_atual = assembly_manager.update(fixed_objects)
-        
+            print( etapa_atual)
             # Envia para o processo HTTP
             payload = {
                 "acao": "overlay_update",

@@ -160,7 +160,7 @@ class IDManager:
         self.trackers_by_class = {
             "hand": Sort(max_age=50, min_hits=1, iou_threshold=0.15),
             "ram":  Sort(max_age=50, min_hits=1, iou_threshold=0.2),
-            "cpu":  Sort(max_age=50, min_hits=1, iou_threshold=0.2),
+            "cpu":  Sort(max_age=100, min_hits=1, iou_threshold=0.2),
             "motherboard": Sort(max_age=50, min_hits=1, iou_threshold=0.2),
             "fan":  Sort(max_age=50, min_hits=1, iou_threshold=0.2),
             "pallet": Sort(max_age=50, min_hits=1, iou_threshold=0.2),
@@ -402,59 +402,6 @@ class IDManager:
 
         return unassigned
     
-
-
-    def get_unassigned_tracks_stable(self, all_tracks, fixed_objects):
-        fixed_track_ids = {
-            slot["track_id"] for slot in fixed_objects.values()
-            if slot.get("track_id") is not None
-        }
-
-        current_unassigned = {}
-        for item in all_tracks:
-            tid = item["track_id"]
-            if tid in fixed_track_ids:
-                continue
-            current_unassigned[tid] = item  # bbox/label
-
-        # marca misses
-        for tid in list(self.unassigned_cache.keys()):
-            if tid not in current_unassigned:
-                self.unassigned_cache[tid]["miss"] += 1
-                if self.unassigned_cache[tid]["miss"] > self.UNASSIGNED_MAX_MISS:
-                    del self.unassigned_cache[tid]
-
-        # atualiza hits
-        for tid, item in current_unassigned.items():
-            bbox = item["bbox"]
-            label = item["label"]
-
-            if tid not in self.unassigned_cache:
-                self.unassigned_cache[tid] = {
-                    "track_id": tid,
-                    "label": label,
-                    "bbox": bbox,
-                    "hits": 1,
-                    "miss": 0
-                }
-            else:
-                u = self.unassigned_cache[tid]
-                u["miss"] = 0
-                u["hits"] += 1
-                # EMA bbox
-                a = self.UNASSIGNED_ALPHA
-                u["bbox"] = [
-                    a*bbox[i] + (1-a)*u["bbox"][i] for i in range(4)
-                ]
-                u["label"] = label
-
-        # só retorna os estáveis
-        out = []
-        for u in self.unassigned_cache.values():
-            if u["hits"] >= self.UNASSIGNED_MIN_HITS:
-                out.append({"track_id": u["track_id"], "bbox": u["bbox"], "label": u["label"]})
-        return out
-
 
 
 
