@@ -1,5 +1,11 @@
 #!/bin/bash
 
+#Mata todos os processos do Chromium para evitar conflitos
+pkill -f chromium
+
+# Seta Resoulução dos Monitores
+./set_resolucao.sh
+
 # --- 1. DESCOBRE ONDE O SCRIPT ESTÁ ---
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 ENV_PATH="$SCRIPT_DIR/../.env"

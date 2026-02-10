@@ -10,9 +10,16 @@ echo "--- Iniciando Parte 1 ---"
 echo "Usuário detectado: $REAL_USER"
 
 # Executa scripts de hardware
-chmod +x ./enable_spi.sh ./enable_pcie3.sh
+chmod +x ./enable_spi.sh ./enable_pcie3.sh ./disable_wayland.sh
 ./enable_spi.sh
 ./enable_pcie3.sh
+./disable_wayland.sh
+
+sudo systemctl disable wayvnc
+sudo systemctl stop wayvnc
+
+sudo systemctl enable vncserver-x11-serviced
+sudo systemctl start vncserver-x11-serviced
 
 sudo apt update
 sudo apt full-upgrade -y
