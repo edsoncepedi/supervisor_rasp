@@ -24,5 +24,8 @@ else
 fi
 
 echo "✅ LightDM configurado para X11."
+
+sudo raspi-config nonint do_wayland W1
+
 sleep 2
 
