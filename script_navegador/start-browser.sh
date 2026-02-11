@@ -1,14 +1,25 @@
 #!/bin/bash
 
-#Mata todos os processos do Chromium para evitar conflitos
-pkill -f chromium
+export DISPLAY=":0"
+export XAUTHORITY="/home/cepedi/.Xauthority"
+export HOME="/home/cepedi"
 
-# Seta Resoulução dos Monitores
-./set_resolucao.sh
+# Espera X ficar pronto
+for i in {1..30}; do
+  if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
+#fechar navegadores abertos 
+pkill -f chromium || true
 
 # --- 1. DESCOBRE ONDE O SCRIPT ESTÁ ---
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 ENV_PATH="$SCRIPT_DIR/../.env"
+
+"$SCRIPT_DIR/set_resolucao.sh"
 
 # --- 2. CARREGA O .ENV ---
 set -a
@@ -23,7 +34,6 @@ set +a
 # Usuário da sessão gráfica
 USER_HOME="/home/cepedi"
 
-export DISPLAY=":0"
 export XAUTHORITY="$USER_HOME/.Xauthority"
 export HOME="$USER_HOME"
 
