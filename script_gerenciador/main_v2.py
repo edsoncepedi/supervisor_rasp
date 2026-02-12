@@ -12,8 +12,19 @@ import spidev
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
 
-GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
+
+try:
+    GPIO.setmode(GPIO.BCM)
+except Exception:
+    pass
+
+try:
+    GPIO.cleanup()
+except Exception:
+    pass
+
+GPIO.setmode(GPIO.BCM)
 
 # =========================
 # RC522 - AUTO RECOVER (THREAD)
@@ -42,6 +53,8 @@ RC522_VERSION_REG = 0x37
 RC522_OK_VALUES = {0x91, 0x92}
 HEALTHCHECK_INTERVAL = 2.0
 
+CONFIRM_TIMEOUT = 3.0  # tempo máximo para esperar uma leitura após reconectar
+ts_reconexao = 0.0
 
 # Compartilhamento thread -> main
 uid_atual = None
@@ -150,8 +163,9 @@ def rfid_worker():
                 leitor = SimpleMFRC522()
                 print("✅ RFID: RC522 inicializado!")
                 with rfid_flag_lock:
-                    global rfid_reconectado
+                    global rfid_reconectado, ts_reconexao
                     rfid_reconectado = True
+                    ts_reconexao = time.time()
                 last_ok = agora
                 last_healthcheck = 0.0
             except Exception as e:
@@ -209,49 +223,55 @@ def rfid_worker():
         time.sleep(RFID_READ_INTERVAL)
 
 def tratar_pos_reconexao():
-    global ultimo_id, ultimo_tempo_lido
-    global rfid_reconectado, rfid_desconectou
-    global uid_no_momento_da_falha, aguardando_confirmacao_pos_reconexao
+    global ultimo_id
+    global rfid_reconectado, aguardando_confirmacao_pos_reconexao
+    global uid_no_momento_da_falha, ts_reconexao
 
-    # Só roda quando reconectou e estamos aguardando confirmação
+    agora = time.time()
+
+    # Só roda quando houve reconexão e estamos aguardando confirmação
     with rfid_flag_lock:
         if not rfid_reconectado or not aguardando_confirmacao_pos_reconexao:
             return
-        rfid_reconectado = False  # consome a flag
+        # NÃO consome rfid_reconectado aqui ainda, pois podemos precisar aguardar leitura
+        t0 = ts_reconexao
 
-    # Pega o UID atual (se houver)
-    agora = time.time()
+    # Lê UID mais recente vindo da thread
     with uid_lock:
         uid = uid_atual
         ts = uid_ts
 
-    # Se ainda não leu nada depois que voltou, não decide ainda
-    if not uid or (agora - ts) > 1.0:
-        # sem cartão após reconexão -> confirma saída
+    # (A) Se já tivemos UMA leitura válida depois da reconexão:
+    if uid and ts >= t0:
+        # consome flags (decisão tomada)
         with rfid_flag_lock:
+            rfid_reconectado = False
             aguardando_confirmacao_pos_reconexao = False
 
+        # mesmo cartão do momento da queda -> não faz nada
+        if uid_no_momento_da_falha is not None and uid == uid_no_momento_da_falha:
+            print("✅ RFID voltou e o mesmo cartão ainda está presente. Não faz checkout.")
+            return
+
+        # cartão mudou -> se tinha alguém logado, faz checkout confirmado
         if ultimo_id is not None:
-            print("⚠️ RFID voltou e não há cartão. Fazendo checkout confirmado.")
+            print("⚠️ RFID voltou e o cartão mudou. Fazendo checkout confirmado.")
             checkout()
             set_lamp_state(False)
             ultimo_id = None
         return
 
-
-    # Agora temos uma leitura após reconexão:
-    with rfid_flag_lock:
-        aguardando_confirmacao_pos_reconexao = False
-
-    # CASO 1: cartão ainda é o mesmo
-    if uid_no_momento_da_falha is not None and uid == uid_no_momento_da_falha:
-        print("✅ RFID voltou e o mesmo cartão ainda está presente. Não faz checkout.")
+    # (B) Ainda não leu nada após reconectar: espera até CONFIRM_TIMEOUT
+    if (agora - t0) < CONFIRM_TIMEOUT:
         return
 
-    # CASO 2: não é o mesmo cartão
-    # Se antes tinha alguém logado, faz checkout agora (confirmado)
+    # (C) Estourou timeout: assume que NÃO há cartão (confirmado)
+    with rfid_flag_lock:
+        rfid_reconectado = False
+        aguardando_confirmacao_pos_reconexao = False
+
     if ultimo_id is not None:
-        print("⚠️ RFID voltou e o cartão mudou/sumiu. Fazendo checkout confirmado.")
+        print("⚠️ RFID voltou, mas não houve leitura após timeout. Fazendo checkout confirmado.")
         checkout()
         set_lamp_state(False)
         ultimo_id = None
@@ -366,6 +386,11 @@ def processar_rfid():
     - detecta entrada de novo cartão
     - detecta remoção (timeout)
     """
+    with rfid_flag_lock:
+        if aguardando_confirmacao_pos_reconexao:
+            # enquanto o RFID está em falha/reconexão, não faz checkout "normal"
+            return
+
     global ultimo_id, ultimo_id_lido, ultimo_tempo_lido
 
     agora = time.time()
