@@ -8,3 +8,4 @@ picamera2==0.3.31
 filterpy==1.4.5
 scikit-image
 lap
+aiomqtt
