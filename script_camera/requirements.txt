@@ -1,8 +1,8 @@
 notebook
 ipykernel
-degirum
-degirum_tools
-degirum_cli
+degirum==0.20.0
+degirum_cli==0.2.0
+degirum_tools==0.26.1
 numpy==1.26.4
 picamera2==0.3.31
 filterpy==1.4.5
