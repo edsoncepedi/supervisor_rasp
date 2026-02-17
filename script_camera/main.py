@@ -63,11 +63,27 @@ MODEL_W = 640
 MODEL_H = 640
 
 # ROI: x, y, largura, altura
-ROI_X = 35
-ROI_Y = 211
+while True:
+    try:
+        URL_CONFIG = f"http://172.16.10.175:5000/api/config/{POSTO}"
 
-ROI_W = 535
-ROI_H = 300
+        response = requests.get(URL_CONFIG, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+
+        ROI_X = data.get("ROI_X", 35)
+        ROI_Y = data.get("ROI_Y", 211)
+        ROI_W = data.get("ROI_W", 535)
+        ROI_H = data.get("ROI_H", 300)
+        CONFIDENCE_THRESHOLD = data.get("CONFIDENCE_THRESHOLD", 0.3)
+
+        print("Config recebida com sucesso!")
+        break  # <- sai do loop quando der certo
+
+    except requests.exceptions.RequestException as e:
+        print("Erro ao buscar config no servidor:", e)
+        print("Tentando novamente em 3 segundos...")
+        time.sleep(3)
 
 ROI = {
     "x1": ROI_X,
@@ -213,7 +229,8 @@ def process_yolo(output_queue, stop_event, start_event):
                 model.input_shape[0], 
                 6, 
                 label_dictionary,
-                confidence_threshold=0.3
+                confidence_threshold=CONFIDENCE_THRESHOLD
+
             )
 
             detections_roi = filtrar_detections_por_roi(detections, ROI)
