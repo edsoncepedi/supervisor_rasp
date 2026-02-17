@@ -53,7 +53,7 @@ RC522_VERSION_REG = 0x37
 RC522_OK_VALUES = {0x91, 0x92}
 HEALTHCHECK_INTERVAL = 2.0
 
-CONFIRM_TIMEOUT = 3.0  # tempo máximo para esperar uma leitura após reconectar
+CONFIRM_TIMEOUT = 8.0  # tempo máximo para esperar uma leitura após reconectar
 ts_reconexao = 0.0
 
 # Compartilhamento thread -> main
@@ -139,6 +139,10 @@ def rfid_worker():
     last_healthcheck = 0.0
     last_ok = time.time()
 
+    last_uid_seen_ts = time.time()
+    RFID_UID_TIMEOUT = 10.0  # se ficar 10s sem conseguir ler nenhum UID, reinicia o leitor
+
+
     while not stop_event.is_set():
         agora = time.time()
 
@@ -205,6 +209,7 @@ def rfid_worker():
 
         # 5) Debounce + publicar UID
         if uid:
+            last_uid_seen_ts = agora  # <<< ADICIONE ISSO
             with uid_lock:
                 if uid != uid_atual or (agora - uid_ts) > RFID_DEBOUNCE:
                     uid_atual = uid
@@ -219,6 +224,16 @@ def rfid_worker():
             except Exception:
                 pass
             spi = None
+        
+        if (agora - last_uid_seen_ts) > RFID_UID_TIMEOUT:
+            print("⚠️ RFID: sem leitura de UID há muito tempo. Forçando reinicialização...")
+            leitor = None
+            try:
+                spi.close()
+            except Exception:
+                pass
+            spi = None
+            last_uid_seen_ts = agora
 
         time.sleep(RFID_READ_INTERVAL)
 
