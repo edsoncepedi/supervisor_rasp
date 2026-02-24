@@ -1,6 +1,10 @@
-interface_grafica = False  # Define se a interface gráfica (OpenCV) será usada
-
 import os
+
+def getenv_bool(nome, default=False):
+    return os.getenv(nome, str(default)).lower() in ("1", "true", "yes", "on")
+
+interface_grafica = getenv_bool("INTERFACE_GRAFICA", True)
+
 import signal
 import cv2
 import numpy as np
