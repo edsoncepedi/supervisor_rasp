@@ -103,9 +103,18 @@ GPIO.setup(SENSOR_PALETE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(SENSOR_CORRENTE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(PEDAL, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-GPIO.output(TOMADA_POSTO, GPIO.HIGH)
-GPIO.output(BATEDOR_POSTO, GPIO.HIGH)
+rele_tomada_ativo_em = int(os.getenv('RELE_TOMADA_ATIVO_EM', '0'))
+rele_batedor_ativo_em = int(os.getenv('RELE_BATEDOR_ATIVO_EM', '0'))
 
+if rele_tomada_ativo_em == 0:
+    GPIO.output(TOMADA_POSTO, GPIO.HIGH)
+else:
+    GPIO.output(TOMADA_POSTO, GPIO.LOW)
+
+if rele_batedor_ativo_em == 0:
+    GPIO.output(BATEDOR_POSTO, GPIO.HIGH)
+else:
+    GPIO.output(BATEDOR_POSTO, GPIO.LOW)
 
 # =========================
 # HELPERS RC522
@@ -341,10 +350,16 @@ def set_lamp_state(ativo):
 
     if ativo != is_output_active:
         if ativo:
-            GPIO.output(TOMADA_POSTO, GPIO.LOW)
+            if rele_tomada_ativo_em == 0:
+                GPIO.output(TOMADA_POSTO, GPIO.LOW)
+            else:
+                GPIO.output(TOMADA_POSTO, GPIO.HIGH)
             print("Posto Liberado")
         else:
-            GPIO.output(TOMADA_POSTO, GPIO.HIGH)
+            if rele_tomada_ativo_em == 0:
+                GPIO.output(TOMADA_POSTO, GPIO.HIGH)
+            else:
+                GPIO.output(TOMADA_POSTO, GPIO.LOW)
             print("Posto Desligado")
 
         is_output_active = ativo
@@ -504,9 +519,15 @@ try:
         if batedor:
             print("Palete livre")
             if time.time() - tempo_batedor <= 2:
-                GPIO.output(BATEDOR_POSTO, GPIO.LOW)
+                if rele_batedor_ativo_em == 0:
+                    GPIO.output(BATEDOR_POSTO, GPIO.LOW)
+                else:
+                    GPIO.output(BATEDOR_POSTO, GPIO.HIGH)
             else:
-                GPIO.output(BATEDOR_POSTO, GPIO.HIGH)
+                if rele_batedor_ativo_em == 0:
+                    GPIO.output(BATEDOR_POSTO, GPIO.HIGH)
+                else:
+                    GPIO.output(BATEDOR_POSTO, GPIO.LOW)
                 batedor = False
 
         time.sleep(0.1)
