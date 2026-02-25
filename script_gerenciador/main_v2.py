@@ -7,7 +7,7 @@ import os
 import threading
 from dotenv import load_dotenv
 import spidev
-
+import socket
 
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
@@ -496,8 +496,32 @@ def verifica_parafusadeira(pino_sensor, cliente):
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 client.on_connect = on_connect
 client.on_message = on_message
-client.connect(BROKER, PORT, keepalive=60)
-client.loop_start()
+
+# Reconnect automático do paho (quando cair depois de já ter conectado)
+client.reconnect_delay_set(min_delay=1, max_delay=30)
+
+def conectar_mqtt_bloqueante():
+    """
+    Não deixa o programa morrer se a rede ainda não subiu.
+    Fica tentando até conectar.
+    """
+    while not stop_event.is_set():
+        try:
+            print(f"🌐 Tentando MQTT em {BROKER}:{PORT} ...")
+            client.connect(BROKER, PORT, keepalive=60)
+            print("✅ MQTT conectado (connect OK).")
+            return True
+        except (OSError, socket.error) as e:
+            print(f"⏳ Rede/MQTT indisponível: {e}. Tentando de novo em 1s...")
+            time.sleep(1)
+    return False
+
+# Só inicia o loop do MQTT depois que conectar
+if conectar_mqtt_bloqueante():
+    client.loop_start()
+else:
+    # stop_event foi setado, saindo
+    raise SystemExit(0)
 
 # Inicia a thread do RFID
 t_rfid = threading.Thread(target=rfid_worker, daemon=True)

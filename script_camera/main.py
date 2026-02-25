@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from queue import Empty, Full
 import aiomqtt
 import asyncio
+import socket
 
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
@@ -466,28 +467,46 @@ def restart_pipeline():
 
 
 async def mqtt_supervisor():
-    async with aiomqtt.Client(BROKER, PORT) as client:
-        await client.subscribe(CMD_TOPIC)
-        print(f"📡 MQTT escutando: {CMD_TOPIC}")
+    backoff = 2  # começa tentando a cada 2s
+    max_backoff = 30
 
-        async for message in client.messages:
-            try:
-                cmd = message.payload.decode().strip().lower()
-            except Exception:
-                continue
+    while True:
+        try:
+            print(f"🌐 Tentando conectar MQTT (aiomqtt) em {BROKER}:{PORT} ...")
+            async with aiomqtt.Client(BROKER, PORT) as client:
+                backoff = 2  # reset backoff quando conecta
 
-            if cmd == "start":
-                if not pipeline_running():
-                    start_pipeline()
+                await client.subscribe(CMD_TOPIC)
+                print(f"📡 MQTT conectado e escutando: {CMD_TOPIC}")
 
-            elif cmd == "stop":
-                stop_pipeline(force=True)
+                async for message in client.messages:
+                    try:
+                        cmd = message.payload.decode().strip().lower()
+                    except Exception:
+                        continue
 
-            elif cmd == "restart":
-                restart_pipeline()
-            else:
-                # ignora qualquer coisa diferente
-                pass
+                    if cmd == "start":
+                        if not pipeline_running():
+                            start_pipeline()
+
+                    elif cmd == "stop":
+                        stop_pipeline(force=True)
+
+                    elif cmd == "restart":
+                        restart_pipeline()
+                    else:
+                        pass
+
+        except (OSError, socket.error, aiomqtt.MqttError) as e:
+            # rede não subiu / broker fora / conexão caiu
+            print(f"⏳ MQTT indisponível: {e}. Tentando novamente em {backoff}s...")
+            await asyncio.sleep(backoff)
+            backoff = min(max_backoff, backoff * 2)
+
+        except Exception as e:
+            # qualquer outra exceção inesperada: não deixa morrer
+            print(f"❌ Erro inesperado no mqtt_supervisor: {e}. Reiniciando em 5s...")
+            await asyncio.sleep(5)
 
 
 def main():
