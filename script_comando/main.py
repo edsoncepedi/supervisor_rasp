@@ -7,7 +7,24 @@ from dotenv import load_dotenv
 dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
 load_dotenv(dotenv_path=dotenv_path)
 
+GPIO.setwarnings(False)
+
+try:
+    GPIO.setmode(GPIO.BCM)
+except Exception:
+    pass
+
+try:
+    GPIO.cleanup()
+except Exception:
+    pass
+
+GPIO.setmode(GPIO.BCM)
+
 BOTAO_IMPRESSORA = int(os.getenv('BOTAO_IMPRESSORA'))
+estado_anterior_pedal = GPIO.HIGH
+
+GPIO.setup(BOTAO_IMPRESSORA, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 def button_calback(channel):
     print("Botão Pressionado")
@@ -25,18 +42,27 @@ def button_calback(channel):
     print(f"Código de Status: {response.status_code}")
     print(f"Conteúdo da Resposta: {response.text}")
 
-def main():
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(BOTAO_IMPRESSORA, GPIO.IN) 
-    
-    GPIO.add_event_detect(BOTAO_IMPRESSORA, GPIO.FALLING, callback=button_calback, bouncetime=1000)
+def verifica_botao(pino):
+    """Detecta acionamento do pedal."""
+    global estado_anterior_pedal
+    estado_atual = GPIO.input(pino)
 
-    try:
-        while True:
-            time.sleep(1)
-    except:
-        GPIO.cleanup()
-            
+    if estado_atual != estado_anterior_pedal:
+        estado_anterior_pedal = estado_atual
 
-if __name__ == "__main__":
-    main()
+        if estado_atual == GPIO.LOW:
+            print("Botão pressionado")
+            button_calback(pino)
+
+try:
+    while True:
+        verifica_botao(BOTAO_IMPRESSORA)                    # BT2
+        time.sleep(0.1)
+
+except KeyboardInterrupt:
+    print("\nPrograma encerrado.")
+
+finally:
+    time.sleep(0.3)
+    GPIO.cleanup()
+
