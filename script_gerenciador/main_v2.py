@@ -44,6 +44,14 @@ aguardando_confirmacao_pos_reconexao = False
 rfid_reconectado = False
 rfid_flag_lock = threading.Lock()
 
+# --- RESYNC CHECKOUT (quando não há cartão) ---
+checkout_pendente = False
+checkout_retry_interval = 2.0      # começa tentando a cada 2s
+CHECKOUT_RETRY_MAX = 30.0          # máximo entre tentativas
+checkout_next_try_ts = 0.0
+SEM_CARTAO_HEARTBEAT = 10.0
+ultimo_heartbeat_sem_cartao = 0
+
 # TESTE SPI
 SPI_BUS = 0
 SPI_DEV = 0  # CE0 (mude para 1 se seu SDA estiver no CE1)
@@ -371,8 +379,8 @@ def ativar_batedor():
     batedor = True
 
 
-def checkout():
-    """Realiza o checkout do funcionário."""
+def checkout() -> bool:
+    """Realiza o checkout do funcionário. Retorna True se o backend respondeu."""
     payload = {'tag': None, 'posto': POSTO, 'acao': 'saida'}
     headers = {'Content-Type': 'application/json'}
 
@@ -380,12 +388,16 @@ def checkout():
         response = requests.post(URL, json=payload, headers=headers, timeout=2)
 
         if response.ok:
-            print("Checkout realizado com sucesso.")
+            print("Checkout sincronizado com backend.")
+            return True
+
         else:
-            print("Erro ao realizar checkout.")
+            print(f"Checkout erro HTTP: {response.status_code}")
+            return False
 
     except Exception as e:
-        print(f"Erro ao enviar requisição: {e}")
+        print(f"Checkout falhou (rede): {e}")
+        return False
 
 
 def verifica_id(tag):
@@ -443,9 +455,35 @@ def processar_rfid():
         # Nenhum UID novo recentemente => pode considerar cartão removido
         if ultimo_id is not None and (agora - ultimo_tempo_lido > TEMPO_PERDA_CARTAO):
             print("Cartão removido.")
-            checkout()
+            ok = checkout()
             set_lamp_state(False)
             ultimo_id = None
+
+            # se falhou, entra em modo resync
+            global checkout_pendente, checkout_retry_interval, checkout_next_try_ts
+            if not ok:
+                checkout_pendente = True
+                checkout_retry_interval = 2.0
+                checkout_next_try_ts = time.time() + checkout_retry_interval
+
+def tratar_pos_reconexao():
+    """Trata o modo resync de checkout pendente."""
+    global checkout_pendente, checkout_retry_interval, checkout_next_try_ts
+
+    if not checkout_pendente:
+        return
+
+    agora = time.time()
+    if agora >= checkout_next_try_ts:
+        print("Tentando reenviar checkout pendente...")
+        ok = checkout()
+        if ok:
+            print("Checkout reenviado com sucesso.")
+            checkout_pendente = False
+        else:
+            # aumenta o intervalo de retry (exponencial)
+            checkout_retry_interval = min(checkout_retry_interval * 2.0, CHECKOUT_RETRY_MAX)
+            checkout_next_try_ts = agora + checkout_retry_interval
 
 
 def verifica_sensor_indutivo(pino_sensor, cliente):
@@ -489,6 +527,59 @@ def verifica_parafusadeira(pino_sensor, cliente):
             print("Parafusadeira acionada")
             cliente.publish(TOPIC_ENVIO_ESP, "BT1")
 
+def resync_checkout_se_necessario():
+    global checkout_pendente, checkout_retry_interval, checkout_next_try_ts
+
+    if not checkout_pendente:
+        return
+
+    agora = time.time()
+    if agora < checkout_next_try_ts:
+        return
+
+    # Só faz sentido resync se NÃO há cartão e a tomada está desligada
+    with uid_lock:
+        uid = uid_atual
+        ts = uid_ts
+
+    cartao_presente = bool(uid and (agora - ts) < 2.0)
+    if cartao_presente:
+        # cartão voltou, não insistir em "saida"
+        checkout_pendente = False
+        return
+
+    ok = checkout()
+    if ok:
+        checkout_pendente = False
+        checkout_retry_interval = 2.0
+        return
+
+    # backoff (2s, 4s, 8s... até 30s)
+    checkout_retry_interval = min(checkout_retry_interval * 2.0, CHECKOUT_RETRY_MAX)
+    checkout_next_try_ts = agora + checkout_retry_interval
+    print(f"🔁 Checkout pendente. Tentando novamente em {checkout_retry_interval:.0f}s...")
+
+def heartbeat_sem_cartao():
+    global ultimo_heartbeat_sem_cartao
+
+    agora = time.time()
+
+    with uid_lock:
+        uid = uid_atual
+        ts = uid_ts
+
+    cartao_presente = bool(uid and (agora - ts) < 2.0)
+
+    if cartao_presente:
+        return
+
+    if (agora - ultimo_heartbeat_sem_cartao) < SEM_CARTAO_HEARTBEAT:
+        return
+
+    print("🔄 Heartbeat sem cartão -> sincronizando saída")
+    checkout()
+
+    ultimo_heartbeat_sem_cartao = agora
 
 # =========================
 # MAIN
@@ -533,6 +624,8 @@ try:
         # RFID agora é consumido via thread
         tratar_pos_reconexao()
         processar_rfid()
+        resync_checkout_se_necessario()
+        heartbeat_sem_cartao()
 
         # Sensores continuam iguais
         verifica_parafusadeira(SENSOR_CORRENTE, client)  # BT1
