@@ -52,9 +52,9 @@ _current = {
 # ================================
 # Configurações Globais (Constantes)
 # ================================
-MODEL_NAME = "digitaldashv3"
-ZOO_PATH = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/digitaldashv3.json"
-LABELS_FILES = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv3/labels_coco.json"
+MODEL_NAME = "digitaldashv6"
+ZOO_PATH = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv6/digitaldashv6.json"
+LABELS_FILES = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv6/labels_coco.json"
 CAMERA_ID = 0
 SERVER_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/camera/{POSTO}"
 SEND_FPS = 20  # Taxa de envio para o servidor
@@ -63,6 +63,9 @@ SEND_FPS = 20  # Taxa de envio para o servidor
 PROCESS_FPS =15
 
 FRAME_TIME = 1.0 / PROCESS_FPS
+
+VIDEO_W_SENSOR = 640 
+VIDEO_H_SENSOR = 640 
 
 MODEL_W = 640
 MODEL_H = 640
@@ -183,7 +186,7 @@ def process_yolo(output_queue, stop_event, start_event):
     print("📷 Iniciando Raspberry Pi AI Camera...")
     picam2 = Picamera2()
     config = picam2.create_video_configuration(
-        main={"size": (MODEL_W, MODEL_H), "format": "RGB888"},
+        main={"size": (VIDEO_W_SENSOR, VIDEO_H_SENSOR), "format": "RGB888"},
         controls={"FrameRate": PROCESS_FPS}
     )
     picam2.configure(config)
@@ -207,8 +210,10 @@ def process_yolo(output_queue, stop_event, start_event):
 
         loop_start = time.perf_counter() # Controle FPS
         # Captura o frame direto como array numpy (já em 640x640)
-        
         frame = picam2.capture_array()
+        #roi_frame = frame[ROI["y1"]:ROI["y2"], ROI["x1"]:ROI["x2"]]
+        #roi_resized = cv2.resize(roi_frame, (MODEL_W, MODEL_H))
+
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frame_blur = cv2.GaussianBlur(frame_rgb, (3, 3), 0)     
         input_tensor = np.expand_dims(frame_blur, axis=0)
@@ -216,7 +221,7 @@ def process_yolo(output_queue, stop_event, start_event):
         # Inferência
 
         frame_id += 1
-        do_predict_only  = (frame_id % 3 == 0)
+        do_predict_only  = (frame_id % 10 == 0)
 
         all_tracks = []
 
@@ -280,11 +285,11 @@ def process_yolo(output_queue, stop_event, start_event):
                 "mostra": True
             })
             if interface_grafica:
-                cv2.rectangle(frame_rgb, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(frame_rgb, f"{fid}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame, f"{fid}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
         if interface_grafica:
-            cv2.rectangle(frame_rgb, (ROI["x1"], ROI["y1"]), (ROI["x2"], ROI["y2"]), (255, 255, 0), 2)
+            cv2.rectangle(frame, (ROI["x1"], ROI["y1"]), (ROI["x2"], ROI["y2"]), (255, 255, 0), 2)
 
         # Lógica de posto
         if POSTO == 0:
@@ -327,8 +332,8 @@ def process_yolo(output_queue, stop_event, start_event):
                 })
 
                 if interface_grafica:
-                    cv2.rectangle(frame_rgb, (x1, y1), (x2, y2), color, 2)
-                    cv2.putText(frame_rgb, detect["label"], (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                    cv2.putText(frame, detect["label"], (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
             # Envia para o processo HTTP
             print(fixed_objects)
             print(" ")
@@ -368,7 +373,7 @@ def process_yolo(output_queue, stop_event, start_event):
 
 
         if interface_grafica:
-            cv2.imshow("Hailo PySDK - DigitalDash", frame_rgb)
+            cv2.imshow("Hailo PySDK - DigitalDash", frame)
 
             if cv2.waitKey(1) & 0xFF == 27: # ESC
                 break
