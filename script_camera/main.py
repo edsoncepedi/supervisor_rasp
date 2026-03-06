@@ -31,13 +31,9 @@ from hailo_postprocess import IDManager
 from assembly_manager import AssemblyManagar
 from assembly_manager import bbox_inside_roi
 
-#BROKER MQTT
-#BROKER = "172.16.10.175"
 BROKER = os.getenv('IP_SERVER')
 PORT = int(os.getenv('PORT_MQTT'))
 POSTO = int(os.getenv("POSTO"))
-
-#PORT = 1883
 
 CMD_TOPIC = f"sistema/camera/posto_{POSTO}"
 
@@ -99,6 +95,7 @@ ROI = {
     "x2": ROI_X + ROI_W,
     "y2": ROI_Y + ROI_H
 }
+print(ROI)
 
 def clean_data(obj):
     if isinstance(obj, float):
@@ -221,7 +218,7 @@ def process_yolo(output_queue, stop_event, start_event):
         # Inferência
 
         frame_id += 1
-        do_predict_only  = (frame_id % 10 == 0)
+        do_predict_only  = (frame_id % 3 == 0)
 
         all_tracks = []
 
