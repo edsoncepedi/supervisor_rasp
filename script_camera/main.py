@@ -80,7 +80,7 @@ while True:
         ROI_W = data.get("ROI_W", 535)
         ROI_H = data.get("ROI_H", 300)
         CONFIDENCE_THRESHOLD = data.get("CONFIDENCE_THRESHOLD", 0.3)
-
+        print(f"Configurações recebidas do servidor: ROI=({ROI_X}, {ROI_Y}, {ROI_W}, {ROI_H}), CONFIDENCE_THRESHOLD={CONFIDENCE_THRESHOLD}")
         print("Config recebida com sucesso!")
         break  # <- sai do loop quando der certo
 

@@ -18,7 +18,7 @@ class AssemblyManagar:
         self.iou_threshold = {
             "hand_ram": 0.02,
             "hand_cpu": 0.05,
-            "fan_hand": 0.3,
+            "fan_hand": 0.03,
             "mb_cpu": 0.03,
             "mb_fan": 0.1
         }
