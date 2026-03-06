@@ -110,12 +110,19 @@ class AssemblyManagar:
 
             if not self.valid2:
        
-                if (d["ram1"]["active"] and iouA > 0.1 and iouB > 0.1 and not d["ram2"]["active"]):
+                if (d["ram1"]["active"] and iouA > 0.1  and not d["ram2"]["active"]):
                     self.valid2 = True
                     return False
-                if (d["ram2"]["active"] and iouA > 0.1 and iouB > 0.1 and not d["ram1"]["active"]):
+                if (d["ram1"]["active"] and iouB > 0.1 and not d["ram2"]["active"]):
                     self.valid2 = True
                     return False
+                if (d["ram2"]["active"] and iouA > 0.1 and not d["ram1"]["active"]):
+                    self.valid2 = True
+                    return False
+                if (d["ram2"]["active"] and iouB > 0.1 and not d["ram1"]["active"]):
+                    self.valid2 = True
+                    return False
+
 
             else:
                 if iouA == 0.0 and iouB == 0.0:
@@ -160,7 +167,10 @@ class AssemblyManagar:
             iouB = self._iou("motherboard1", "hand2")
 
             if not self.valid3:
-                if (not d["ram1"]["active"] and iouA > 0.1 and iouB > 0.1 and not d["ram2"]["active"]):
+                if (not d["ram1"]["active"] and iouA > 0.1  and not d["ram2"]["active"]):
+                    self.valid3 = True
+                    return False
+                if (not d["ram1"]["active"] and iouB > 0.1 and not d["ram2"]["active"]):
                     self.valid3 = True
                     return False
             else:
