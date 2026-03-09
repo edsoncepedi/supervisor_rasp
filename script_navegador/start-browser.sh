@@ -42,9 +42,10 @@ mkdir -p "$HOME/.config/chromium/Crashpad"
 # Aguarda interface gráfica
 sleep 3
 
-# URLs
-URL_MONITOR_1="http://$IP_SERVER:$PORT_FRONTEND/?posto=$POSTO"
-URL_MONITOR_2="http://$IP_SERVER:$PORT_SERVER/posto/$POSTO"
+TS=$(date +%s)
+
+URL_MONITOR_1="http://$IP_SERVER:$PORT_FRONTEND/?posto=$POSTO&t=$TS"
+URL_MONITOR_2="http://$IP_SERVER:$PORT_SERVER/posto/$POSTO?t=$TS"
 
 # Resolução dos monitores (AJUSTE SE NECESSÁRIO)
 MONITOR_WIDTH=1280
