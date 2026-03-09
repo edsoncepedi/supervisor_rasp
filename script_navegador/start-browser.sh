@@ -59,6 +59,12 @@ MONITOR_HEIGHT=720
   --kiosk \
   --no-first-run \
   --disable-gpu \
+  --disable-application-cache \
+  --disk-cache-size=0 \
+  --media-cache-size=0 \
+  --disable-cache \
+  --disable-service-worker \
+  --aggressive-cache-discard \
   --force-device-scale-factor=0.8 \
   --window-position=0,0 \
   --window-size=${MONITOR_WIDTH},${MONITOR_HEIGHT} \
@@ -75,6 +81,12 @@ sleep 1
   --kiosk \
   --no-first-run \
   --disable-gpu \
+  --disable-application-cache \
+  --disk-cache-size=0 \
+  --media-cache-size=0 \
+  --disable-cache \
+  --disable-service-worker \
+  --aggressive-cache-discard \
   --force-device-scale-factor=0.8 \
   --window-position=${MONITOR_WIDTH},0 \
   --window-size=${MONITOR_WIDTH},${MONITOR_HEIGHT} \
