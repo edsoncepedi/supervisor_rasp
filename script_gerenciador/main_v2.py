@@ -632,13 +632,6 @@ def enviar_heartbeat():
             # cancela qualquer resync antigo de checkout
             checkout_pendente = False
 
-            # opcional: avisa display/ESP
-            try:
-                client.publish(TOPIC_ENVIO_ESP, "LOGOUT")
-                client.publish(TOPIC_ENVIO_RASP, f"logout:{motivo}")
-            except Exception as e:
-                print(f"Falha publicando logout MQTT: {e}")
-
     except Exception as e:
         print("Falha heartbeat:", e)
 # =========================
