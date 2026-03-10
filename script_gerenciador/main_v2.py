@@ -104,6 +104,9 @@ ultimo_id_lido = None
 ultimo_tempo_lido = 0
 TEMPO_PERDA_CARTAO = 1.0  # Tempo para considerar que o cartão saiu
 
+HEARTBEAT_INTERVAL = 5
+ultimo_heartbeat = 0
+
 # --- CONFIGURAÇÃO DOS PINOS ---
 GPIO.setup(TOMADA_POSTO, GPIO.OUT)
 GPIO.setup(BATEDOR_POSTO, GPIO.OUT)
@@ -466,7 +469,7 @@ def processar_rfid():
                 checkout_retry_interval = 2.0
                 checkout_next_try_ts = time.time() + checkout_retry_interval
 
-def tratar_pos_reconexao():
+def tratar_checkout_pendente():
     """Trata o modo resync de checkout pendente."""
     global checkout_pendente, checkout_retry_interval, checkout_next_try_ts
 
@@ -581,6 +584,63 @@ def heartbeat_sem_cartao():
 
     ultimo_heartbeat_sem_cartao = agora
 
+
+def enviar_heartbeat():
+    global ultimo_heartbeat, ultimo_id, checkout_pendente
+
+    agora = time.time()
+
+    if agora - ultimo_heartbeat < HEARTBEAT_INTERVAL:
+        return
+
+    ultimo_heartbeat = agora
+
+    if ultimo_id is None:
+        return
+
+    payload = {
+        "posto": POSTO,
+        "tag": str(ultimo_id)
+    }
+
+    try:
+        response = requests.post(
+            f"http://{os.getenv('IP_SERVER')}/rfid_heartbeat",
+            json=payload,
+            timeout=(1, 2)
+        )
+
+        if not response.ok:
+            print(f"Heartbeat erro HTTP: {response.status_code}")
+            return
+
+        data = response.json()
+        acao = data.get("acao")
+        motivo = data.get("motivo", "")
+
+        print(f"Heartbeat recebido: {data}")
+
+        if acao == "logout":
+            print(f"⚠️ Logout forçado pelo backend: {motivo}")
+
+            # desliga o posto imediatamente
+            set_lamp_state(False)
+
+            # limpa o estado local para permitir novo login automático
+            ultimo_id = None
+
+            # cancela qualquer resync antigo de checkout
+            checkout_pendente = False
+
+            # opcional: avisa display/ESP
+            try:
+                client.publish(TOPIC_ENVIO_ESP, "LOGOUT")
+                client.publish(TOPIC_ENVIO_RASP, f"logout:{motivo}")
+            except Exception as e:
+                print(f"Falha publicando logout MQTT: {e}")
+
+    except Exception as e:
+        print("Falha heartbeat:", e)
 # =========================
 # MAIN
 # =========================
@@ -624,7 +684,9 @@ try:
         # RFID agora é consumido via thread
         tratar_pos_reconexao()
         processar_rfid()
+        tratar_checkout_pendente()
         resync_checkout_se_necessario()
+        enviar_heartbeat()
         heartbeat_sem_cartao()
 
         # Sensores continuam iguais
