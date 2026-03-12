@@ -61,7 +61,7 @@ RC522_VERSION_REG = 0x37
 RC522_OK_VALUES = {0x91, 0x92}
 HEALTHCHECK_INTERVAL = 2.0
 
-CONFIRM_TIMEOUT = 8.0  # tempo máximo para esperar uma leitura após reconectar
+CONFIRM_TIMEOUT = 15.0  # tempo máximo para esperar uma leitura após reconectar
 ts_reconexao = 0.0
 
 # Compartilhamento thread -> main
@@ -152,6 +152,8 @@ def rc522_healthcheck(spi) -> bool:
 
 def rfid_worker():
     global uid_atual, uid_ts
+    global rfid_reconectado, ts_reconexao
+    global rfid_desconectou, uid_no_momento_da_falha, aguardando_confirmacao_pos_reconexao
 
     leitor = None
     spi = None
@@ -187,7 +189,6 @@ def rfid_worker():
                 leitor = SimpleMFRC522()
                 print("✅ RFID: RC522 inicializado!")
                 with rfid_flag_lock:
-                    global rfid_reconectado, ts_reconexao
                     rfid_reconectado = True
                     ts_reconexao = time.time()
                 last_ok = agora
@@ -204,18 +205,28 @@ def rfid_worker():
 
             if not rc522_healthcheck(spi):
                 print("⚠️ RFID: RC522 não responde SPI (healthcheck). Reiniciando...")
+
+                with uid_lock:
+                    ultimo_uid_visto = uid_atual
+
                 leitor = None
                 try:
                     spi.close()
                 except Exception:
                     pass
                 spi = None
+
+                with uid_lock:
+                    uid_atual = None
+                    uid_ts = 0.0
+
                 time.sleep(0.5)
+
                 with rfid_flag_lock:
-                    global rfid_desconectou, uid_no_momento_da_falha, aguardando_confirmacao_pos_reconexao
                     rfid_desconectou = True
-                    uid_no_momento_da_falha = uid_atual  # captura o último UID visto
+                    uid_no_momento_da_falha = ultimo_uid_visto
                     aguardando_confirmacao_pos_reconexao = True
+
                 continue
             else:
                 last_ok = agora  # SPI respondeu corretamente
@@ -238,6 +249,11 @@ def rfid_worker():
         # 6) Watchdog extra (caso tudo fique estranho)
         if (agora - last_ok) > RFID_WATCHDOG_TIMEOUT:
             print("⚠️ RFID: watchdog. Reiniciando...")
+
+            with uid_lock:
+                uid_atual = None
+                uid_ts = 0.0
+
             leitor = None
             try:
                 spi.close()
@@ -247,6 +263,11 @@ def rfid_worker():
         
         if (agora - last_uid_seen_ts) > RFID_UID_TIMEOUT:
             print("⚠️ RFID: sem leitura de UID há muito tempo. Forçando reinicialização...")
+
+            with uid_lock:
+                uid_atual = None
+                uid_ts = 0.0
+
             leitor = None
             try:
                 spi.close()
@@ -424,13 +445,59 @@ def verifica_id(tag):
     except Exception as e:
         print(f"Erro ao enviar requisição: {e}")
 
+BOOT_GRACE_PERIOD = 15.0
+program_start_ts = time.time()
 
 def processar_rfid():
-    """
+    global ultimo_id, ultimo_id_lido, ultimo_tempo_lido
+    global checkout_pendente, checkout_retry_interval, checkout_next_try_ts
+
+    if (time.time() - program_start_ts) < BOOT_GRACE_PERIOD:
+        return
+
+    with rfid_flag_lock:
+        if aguardando_confirmacao_pos_reconexao:
+            return
+
+    agora = time.time()
+
+    with uid_lock:
+        uid = uid_atual
+        ts = uid_ts
+
+    cartao_presente = bool(uid and (agora - ts) < 2.5)
+
+    if cartao_presente:
+        ultimo_id_lido = uid
+        ultimo_tempo_lido = agora
+
+        if uid != ultimo_id:
+            ultimo_id = uid
+            print(f"Cartão detectado: {uid}")
+            verifica_id(uid)
+
+    else:
+        if ultimo_id is not None and (agora - ultimo_tempo_lido > TEMPO_PERDA_CARTAO):
+            print("Cartão removido.")
+            ok = checkout()
+            set_lamp_state(False)
+            ultimo_id = None
+
+            if not ok:
+                checkout_pendente = True
+                checkout_retry_interval = 2.0
+                checkout_next_try_ts = time.time() + checkout_retry_interval
+
+"""
+def processar_rfid():
+    '''
     Consome o UID vindo da thread do RFID e aplica a mesma lógica original:
     - detecta entrada de novo cartão
     - detecta remoção (timeout)
-    """
+    '''
+    if (time.time() - program_start_ts) < BOOT_GRACE_PERIOD:
+        return
+    
     with rfid_flag_lock:
         if aguardando_confirmacao_pos_reconexao:
             # enquanto o RFID está em falha/reconexão, não faz checkout "normal"
@@ -468,6 +535,7 @@ def processar_rfid():
                 checkout_pendente = True
                 checkout_retry_interval = 2.0
                 checkout_next_try_ts = time.time() + checkout_retry_interval
+"""
 
 def tratar_checkout_pendente():
     """Trata o modo resync de checkout pendente."""
@@ -677,10 +745,8 @@ try:
         # RFID agora é consumido via thread
         tratar_pos_reconexao()
         processar_rfid()
-        tratar_checkout_pendente()
         resync_checkout_se_necessario()
         enviar_heartbeat()
-        heartbeat_sem_cartao()
 
         # Sensores continuam iguais
         verifica_parafusadeira(SENSOR_CORRENTE, client)  # BT1
