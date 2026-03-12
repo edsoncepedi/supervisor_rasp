@@ -127,6 +127,14 @@ if rele_batedor_ativo_em == 0:
 else:
     GPIO.output(BATEDOR_POSTO, GPIO.LOW)
 
+### =================================
+### Controle Batedor
+### =================================
+
+aguardando_saida_palete = False
+tempo_ultimo_batedor = 0
+TEMPO_RETENTATIVA_BATEDOR = 3.0
+
 # =========================
 # HELPERS RC522
 # =========================
@@ -399,9 +407,15 @@ def set_lamp_state(ativo):
 
 def ativar_batedor():
     global batedor, tempo_batedor
+    global aguardando_saida_palete, tempo_ultimo_batedor
+
     tempo_batedor = time.time()
+    tempo_ultimo_batedor = tempo_batedor
     batedor = True
 
+    aguardando_saida_palete = True
+
+    print("🔨 Batedor acionado, aguardando saída do palete")
 
 def checkout() -> bool:
     """Realiza o checkout do funcionário. Retorna True se o backend respondeu."""
@@ -558,19 +572,26 @@ def tratar_checkout_pendente():
 
 
 def verifica_sensor_indutivo(pino_sensor, cliente):
-    """Detecta chegada e saída de palete."""
     global estado_anterior_palete
+    global aguardando_saida_palete
+
     estado_atual = GPIO.input(pino_sensor)
 
     if estado_atual != estado_anterior_palete:
+
         estado_anterior_palete = estado_atual
 
         if estado_atual == GPIO.LOW:
             print("Chegou palete")
-            #cliente.publish(TOPIC_ENVIO_ESP, "BS")
+
         else:
             print("Palete removido")
             cliente.publish(TOPIC_ENVIO_ESP, "BD")
+
+            if aguardando_saida_palete:
+                aguardando_saida_palete = False
+                print("BD enviado (ciclo concluído)")
+            
 
 
 def verifica_pedal(pino_pedal, cliente):
@@ -597,6 +618,24 @@ def verifica_parafusadeira(pino_sensor, cliente):
         if estado_atual == GPIO.LOW:
             print("Parafusadeira acionada")
             cliente.publish(TOPIC_ENVIO_ESP, "BT1")
+
+def verificar_palete_preso():
+    global aguardando_saida_palete
+    global tempo_ultimo_batedor
+    global batedor, tempo_batedor
+
+    if not aguardando_saida_palete:
+        return
+
+    agora = time.time()
+
+    if agora - tempo_ultimo_batedor > TEMPO_RETENTATIVA_BATEDOR:
+
+        print("⚠️ Palete possivelmente preso, tentando novamente")
+
+        tempo_batedor = agora
+        tempo_ultimo_batedor = agora
+        batedor = True
 
 def resync_checkout_se_necessario():
     global checkout_pendente, checkout_retry_interval, checkout_next_try_ts
@@ -752,6 +791,8 @@ try:
         verifica_parafusadeira(SENSOR_CORRENTE, client)  # BT1
         verifica_pedal(PEDAL, client)                    # BT2
         verifica_sensor_indutivo(SENSOR_PALETE, client)  # BD
+
+        verificar_palete_preso()
 
         # Controle do batedor com tempo
         if batedor:
