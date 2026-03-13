@@ -253,7 +253,8 @@ def rfid_worker():
                 if uid != uid_atual or (agora - uid_ts) > RFID_DEBOUNCE:
                     uid_atual = uid
                     uid_ts = agora
-
+            
+            rfid_desconectou = False
         # 6) Watchdog extra (caso tudo fique estranho)
         if (agora - last_ok) > RFID_WATCHDOG_TIMEOUT:
             print("⚠️ RFID: watchdog. Reiniciando...")
@@ -268,7 +269,7 @@ def rfid_worker():
             except Exception:
                 pass
             spi = None
-        
+        """
         if (agora - last_uid_seen_ts) > RFID_UID_TIMEOUT:
             print("⚠️ RFID: sem leitura de UID há muito tempo. Forçando reinicialização...")
 
@@ -282,7 +283,7 @@ def rfid_worker():
             except Exception:
                 pass
             spi = None
-            last_uid_seen_ts = agora
+            last_uid_seen_ts = agora"""
 
         time.sleep(RFID_READ_INTERVAL)
 
@@ -462,11 +463,88 @@ def verifica_id(tag):
 BOOT_GRACE_PERIOD = 15.0
 program_start_ts = time.time()
 
+def confirmar_remocao_cartao():
+    """
+    Faz algumas tentativas curtas antes de concluir que o cartão saiu.
+    Evita checkout falso por falha momentânea do RC522.
+    """
+    tentativas = 8
+
+    for _ in range(tentativas):
+        with uid_lock:
+            uid = uid_atual
+            ts = uid_ts
+
+        agora = time.time()
+
+        if uid and (agora - ts) < 2.5:
+            return False
+
+        time.sleep(0.15)
+
+    return True
+
 def processar_rfid():
     global ultimo_id, ultimo_id_lido, ultimo_tempo_lido
     global checkout_pendente, checkout_retry_interval, checkout_next_try_ts
 
     if (time.time() - program_start_ts) < BOOT_GRACE_PERIOD:
+        return
+
+    with rfid_flag_lock:
+        if aguardando_confirmacao_pos_reconexao:
+            return
+
+    agora = time.time()
+
+    with uid_lock:
+        uid = uid_atual
+        ts = uid_ts
+
+    # Se houve leitura recente, mantém sessão viva
+    if uid and (agora - ts) < 2.5:
+        ultimo_id_lido = uid
+        ultimo_tempo_lido = agora
+
+        if uid != ultimo_id:
+            ultimo_id = uid
+            print(f"Cartão detectado: {uid}")
+            verifica_id(uid)
+
+        return
+
+    # Se não há ninguém logado, não há o que fazer
+    if ultimo_id is None:
+        return
+
+    # Ainda não passou o tempo de perda
+    if (agora - ultimo_tempo_lido) <= TEMPO_PERDA_CARTAO:
+        return
+
+    # Confirma ausência antes de derrubar sessão
+    if not confirmar_remocao_cartao():
+        ultimo_tempo_lido = time.time()
+        return
+
+    print("Cartão removido.")
+    ok = checkout()
+    set_lamp_state(False)
+    ultimo_id = None
+
+    if not ok:
+        checkout_pendente = True
+        checkout_retry_interval = 2.0
+        checkout_next_try_ts = time.time() + checkout_retry_interval
+"""
+def processar_rfid():
+    global ultimo_id, ultimo_id_lido, ultimo_tempo_lido
+    global checkout_pendente, checkout_retry_interval, checkout_next_try_ts
+    global rfid_desconectou
+
+    if (time.time() - program_start_ts) < BOOT_GRACE_PERIOD:
+        return
+    
+    if rfid_desconectou:
         return
 
     with rfid_flag_lock:
@@ -500,56 +578,8 @@ def processar_rfid():
             if not ok:
                 checkout_pendente = True
                 checkout_retry_interval = 2.0
-                checkout_next_try_ts = time.time() + checkout_retry_interval
+                checkout_next_try_ts = time.time() + checkout_retry_interval"""
 
-"""
-def processar_rfid():
-    '''
-    Consome o UID vindo da thread do RFID e aplica a mesma lógica original:
-    - detecta entrada de novo cartão
-    - detecta remoção (timeout)
-    '''
-    if (time.time() - program_start_ts) < BOOT_GRACE_PERIOD:
-        return
-    
-    with rfid_flag_lock:
-        if aguardando_confirmacao_pos_reconexao:
-            # enquanto o RFID está em falha/reconexão, não faz checkout "normal"
-            return
-
-    global ultimo_id, ultimo_id_lido, ultimo_tempo_lido
-
-    agora = time.time()
-
-    with uid_lock:
-        uid = uid_atual
-        ts = uid_ts
-
-    # Se temos um UID "recente"
-    if uid and (agora - ts) < 2.0:
-        ultimo_id_lido = uid
-        ultimo_tempo_lido = agora
-
-        if uid != ultimo_id:
-            ultimo_id = uid
-            print(f"Cartão detectado: {uid}")
-            verifica_id(uid)
-
-    else:
-        # Nenhum UID novo recentemente => pode considerar cartão removido
-        if ultimo_id is not None and (agora - ultimo_tempo_lido > TEMPO_PERDA_CARTAO):
-            print("Cartão removido.")
-            ok = checkout()
-            set_lamp_state(False)
-            ultimo_id = None
-
-            # se falhou, entra em modo resync
-            global checkout_pendente, checkout_retry_interval, checkout_next_try_ts
-            if not ok:
-                checkout_pendente = True
-                checkout_retry_interval = 2.0
-                checkout_next_try_ts = time.time() + checkout_retry_interval
-"""
 
 def tratar_checkout_pendente():
     """Trata o modo resync de checkout pendente."""
@@ -725,7 +755,7 @@ def enviar_heartbeat():
         acao = data.get("acao")
         motivo = data.get("motivo", "")
 
-        print(f"Heartbeat recebido: {data}")
+        print("Heartbeat resposta completa:", data)
 
         if acao == "logout":
             print(f"⚠️ Logout forçado pelo backend: {motivo}")
