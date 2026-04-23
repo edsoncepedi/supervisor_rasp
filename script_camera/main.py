@@ -288,70 +288,17 @@ def process_yolo(output_queue, stop_event, start_event):
         if interface_grafica:
             cv2.rectangle(frame, (ROI["x1"], ROI["y1"]), (ROI["x2"], ROI["y2"]), (255, 255, 0), 2)
 
-        # Lógica de posto
-        if POSTO == 0:
-
-            if not do_predict_only:
-                unassigned_detections = id_manager.get_unassigned_tracks(all_tracks, fixed_objects)
-                last_unassigned_detections = unassigned_detections
-            else:
-                if last_unassigned_detections:
-                    unassigned_detections = last_unassigned_detections
-                else:
-                    unassigned_detections = []
-            unassigned = []
-            
-            
-            # Desenho e Preparação do Payload
-            
-            for detect in unassigned_detections:
-                if detect["bbox"] is None:
-                    continue
-                x1, y1, x2, y2 = map(int, detect["bbox"])
-                if (detect["label"] == "cpu" or detect["label"] == "fan"):
-                    pad_w = 20
-                    pad_h = 20
-                    x1 = max(0, x1 - pad_w)
-                    y1 = max(0, y1 - pad_h)
-                    x2 = x2 + pad_w
-                    y2 = y2 + pad_h
-                elif (detect["label"] == "pallet"):
-                    continue
-                
-                color = (0, 255, 0) 
-
-                unassigned.append({
-                    "id": detect["track_id"],
-                    "x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1,
-                    "texto": detect["label"],
-                    "cor": "#FFFB00",
-                    "mostra": True
-                })
-
-                if interface_grafica:
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                    cv2.putText(frame, detect["label"], (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-            # Envia para o processo HTTP
-            print(fixed_objects)
-            print(" ")
-            print(unassigned)
-            payload = {
-                "acao": "overlay_update",
-                "retangulos": retangulos,
-                "unassigned": unassigned
-            }
-
-           
-        else:
-            #assembly_manager.contar_produtos_posto(detections_roi)
-            etapa_atual = assembly_manager.update(fixed_objects)
-            print( etapa_atual)
-            # Envia para o processo HTTP
-            payload = {
-                "acao": "overlay_update",
-                "retangulos": retangulos,
-                "etapa": etapa_atual
-            }
+        # Lógica de posto 1 e 2 unidas
+        
+        #assembly_manager.contar_produtos_posto(detections_roi)
+        etapa_atual = assembly_manager.update(fixed_objects)
+        print( etapa_atual)
+        # Envia para o processo HTTP
+        payload = {
+            "acao": "overlay_update",
+            "retangulos": retangulos,
+            "etapa": etapa_atual
+        }
 
         #if not output_queue.full():
         #    output_queue.put(payload)
