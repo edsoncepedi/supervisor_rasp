@@ -613,6 +613,8 @@ def verifica_sensor_indutivo(pino_sensor, cliente):
 
         if estado_atual == GPIO.LOW:
             print("Chegou palete")
+            cliente.publish(TOPIC_ENVIO_ESP, " 73 84 74 FC")
+
 
         else:
             print("Palete removido")
@@ -635,19 +637,6 @@ def verifica_pedal(pino_pedal, cliente):
         if estado_atual == GPIO.LOW:
             print("Pedal pressionado")
             cliente.publish(TOPIC_ENVIO_ESP, "BT2")
-
-
-def verifica_parafusadeira(pino_sensor, cliente):
-    """Detecta acionamento da parafusadeira."""
-    global estado_anterior_parafusadeira
-    estado_atual = GPIO.input(pino_sensor)
-
-    if estado_atual != estado_anterior_parafusadeira:
-        estado_anterior_parafusadeira = estado_atual
-
-        if estado_atual == GPIO.LOW:
-            print("Parafusadeira acionada")
-            cliente.publish(TOPIC_ENVIO_ESP, "BT1")
 
 def verificar_palete_preso():
     global aguardando_saida_palete
@@ -817,8 +806,6 @@ try:
         resync_checkout_se_necessario()
         enviar_heartbeat()
 
-        # Sensores continuam iguais
-        verifica_parafusadeira(SENSOR_CORRENTE, client)  # BT1
         verifica_pedal(PEDAL, client)                    # BT2
         verifica_sensor_indutivo(SENSOR_PALETE, client)  # BD
 
