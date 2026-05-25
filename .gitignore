@@ -27,6 +27,7 @@ venv/
 #ignora arquivos csv e xls
 *.csv
 *.xlsx
+.codex
 
 #Ignora o arquivo .env
 .env

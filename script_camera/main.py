@@ -69,7 +69,7 @@ MODEL_H = 640
 # ROI: x, y, largura, altura
 while True:
     try:
-        URL_CONFIG = f"http://172.16.10.175:5000/api/config/{POSTO}"
+        URL_CONFIG = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/config/{POSTO}"
 
         response = requests.get(URL_CONFIG, timeout=5)
         response.raise_for_status()
