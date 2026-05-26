@@ -29,7 +29,6 @@ class AssemblyManagar:
         contagem = Counter(d["label"] for d in detections)
         #print(contagem) 
 
-
     def _has_measurement(self, detections):
         return any(v["active"] for v in detections.values())
     
@@ -59,6 +58,18 @@ class AssemblyManagar:
             case 4:
                 if self._etapa4(d):
                     self.etapa_atual += 1
+            case 5:
+                if self._etapa5(d):
+                    self.etapa_atual += 1
+            case 6:
+                if self._etapa6(d):
+                    self.etapa_atual += 1
+            case 7:
+                if self._etapa7(d):
+                    self.etapa_atual += 1
+            case 8:
+                if self._etapa8(d):
+                    self.etapa_atual += 1
 
         return self.etapa_atual
 
@@ -78,108 +89,90 @@ class AssemblyManagar:
                 a, b = keys[i], keys[j]
                 self._iou_cache[(a, b)] = iou(detections[a]["bbox"],
                                             detections[b]["bbox"])
-
-
+                
     def _iou(self, a, b):
         return self._iou_cache.get((a, b), self._iou_cache.get((b, a), 0.0))
 
     def _etapa1(self, d) -> bool:
-        if self.posto == 1:
-            return (self._iou("hand1", "cpu1") > self.iou_threshold["hand_cpu"] or
-                    self._iou("hand2", "cpu1") > self.iou_threshold["hand_cpu"])
-
-        elif self.posto == 2:
-            thr = self.iou_threshold["hand_ram"]
-            return (self._iou("hand1", "ram1") > thr or
-                    self._iou("hand1", "ram2") > thr or
-                    self._iou("hand2", "ram1") > thr or
-                    self._iou("hand2", "ram2") > thr)
-
-        return False
+        
+        return (self._iou("hand1", "cpu1") > self.iou_threshold["hand_cpu"] or
+                self._iou("hand2", "cpu1") > self.iou_threshold["hand_cpu"])
 
     def _etapa2(self, d) -> bool:
-        if self.posto == 1:
-            iou_mb_cpu = self._iou("motherboard1", "cpu1")
-            iou_mb_h1  = self._iou("motherboard1", "hand1")
-            iou_mb_h2  = self._iou("motherboard1", "hand2")
-            return (iou_mb_cpu > self.iou_threshold["mb_cpu"] and iou_mb_h1 == 0.0 and iou_mb_h2 == 0.0)
-
-        elif self.posto == 2:
-            iouA = self._iou("motherboard1", "hand1")
-            iouB = self._iou("motherboard1", "hand2")
-
-            if not self.valid2:
-       
-                if (d["ram1"]["active"] and iouA > 0.1  and not d["ram2"]["active"]):
-                    self.valid2 = True
-                    return False
-                if (d["ram1"]["active"] and iouB > 0.1 and not d["ram2"]["active"]):
-                    self.valid2 = True
-                    return False
-                if (d["ram2"]["active"] and iouA > 0.1 and not d["ram1"]["active"]):
-                    self.valid2 = True
-                    return False
-                if (d["ram2"]["active"] and iouB > 0.1 and not d["ram1"]["active"]):
-                    self.valid2 = True
-                    return False
-
-
-            else:
-                if iouA == 0.0 and iouB == 0.0:
-                    self.valid2 = False
-                    return True
-        return False
-
+    
+        iou_mb_cpu = self._iou("motherboard1", "cpu1")
+        iou_mb_h1  = self._iou("motherboard1", "hand1")
+        iou_mb_h2  = self._iou("motherboard1", "hand2")
+        return (iou_mb_cpu > self.iou_threshold["mb_cpu"] and iou_mb_h1 == 0.0 and iou_mb_h2 == 0.0)
 
     def _etapa3(self, d) -> bool:
-        if self.posto == 1:
-            thr = self.iou_threshold["fan_hand"]
-            return (self._iou("fan1", "hand1") > thr or self._iou("fan1", "hand2") > thr)
-
-        elif self.posto == 2:
-            # mantém seu reset de etapa
-            if d["ram1"]["active"] and d["ram2"]["active"]:
-                self.etapa_atual = 2
-                return False
-
-            thr = self.iou_threshold["hand_ram"]
-            return (self._iou("hand1", "ram1") > thr or
-                    self._iou("hand1", "ram2") > thr or
-                    self._iou("hand2", "ram1") > thr or
-                    self._iou("hand2", "ram2") > thr)
-
-        return False
-
+        thr = self.iou_threshold["fan_hand"]
+        return (self._iou("fan1", "hand1") > thr or self._iou("fan1", "hand2") > thr)
 
     def _etapa4(self, d) -> bool:
-        if self.posto == 1:
-            iou_mb_fan = self._iou("motherboard1", "fan1")
-            iou_mb_h1  = self._iou("motherboard1", "hand1")
-            iou_mb_h2  = self._iou("motherboard1", "hand2")
-            return (iou_mb_fan > self.iou_threshold["mb_fan"] and iou_mb_h1 == 0.0 and iou_mb_h2 == 0.0)
+        iou_mb_fan = self._iou("motherboard1", "fan1")
+        iou_mb_h1  = self._iou("motherboard1", "hand1")
+        iou_mb_h2  = self._iou("motherboard1", "hand2")
+        return (iou_mb_fan > self.iou_threshold["mb_fan"] and iou_mb_h1 == 0.0 and iou_mb_h2 == 0.0)
 
-        elif self.posto == 2:
-            if d["ram1"]["active"] and d["ram2"]["active"]:
-                self.etapa_atual = 3
+    def _etapa5(self, d) -> bool:
+        thr = self.iou_threshold["hand_ram"]
+        return (self._iou("hand1", "ram1") > thr or
+                self._iou("hand1", "ram2") > thr or
+                self._iou("hand2", "ram1") > thr or
+                self._iou("hand2", "ram2") > thr)
+    
+    def _etapa6(self, d) -> bool:
+        iouA = self._iou("motherboard1", "hand1")
+        iouB = self._iou("motherboard1", "hand2")
+        if not self.valid2:
+            if (d["ram1"]["active"] and iouA > 0.1  and not d["ram2"]["active"]):
+                self.valid2 = True
                 return False
+            if (d["ram1"]["active"] and iouB > 0.1 and not d["ram2"]["active"]):
+                self.valid2 = True
+                return False
+            if (d["ram2"]["active"] and iouA > 0.1 and not d["ram1"]["active"]):
+                self.valid2 = True
+                return False
+            if (d["ram2"]["active"] and iouB > 0.1 and not d["ram1"]["active"]):
+                self.valid2 = True
+                return False
+        else:
+            if iouA == 0.0 and iouB == 0.0:
+                self.valid2 = False
+                return True
+            
+    def _etapa7(self, d)-> bool:
+        if d["ram1"]["active"] and d["ram2"]["active"]:
+            self.etapa_atual -= 1
+            return False
 
-            iouA = self._iou("motherboard1", "hand1")
-            iouB = self._iou("motherboard1", "hand2")
+        thr = self.iou_threshold["hand_ram"]
+        return (self._iou("hand1", "ram1") > thr or
+                self._iou("hand1", "ram2") > thr or
+                self._iou("hand2", "ram1") > thr or
+                self._iou("hand2", "ram2") > thr)
+    
+    def _etapa8(self, d) -> bool:
+        if d["ram1"]["active"] and d["ram2"]["active"]:
+            self.etapa_atual -= 1
+            return False
 
-            if not self.valid3:
-                if (not d["ram1"]["active"] and iouA > 0.1  and not d["ram2"]["active"]):
-                    self.valid3 = True
-                    return False
-                if (not d["ram1"]["active"] and iouB > 0.1 and not d["ram2"]["active"]):
-                    self.valid3 = True
-                    return False
-            else:
-                if iouA == 0.0 and iouB == 0.0:
-                    self.valid3 = False
-                    return True
+        iouA = self._iou("motherboard1", "hand1")
+        iouB = self._iou("motherboard1", "hand2")
 
-        return False
-
+        if not self.valid3:
+            if (not d["ram1"]["active"] and iouA > 0.1  and not d["ram2"]["active"]):
+                self.valid3 = True
+                return False
+            if (not d["ram1"]["active"] and iouB > 0.1 and not d["ram2"]["active"]):
+                self.valid3 = True
+                return False
+        else:
+            if iouA == 0.0 and iouB == 0.0:
+                self.valid3 = False
+                return True
 
 
 def bbox_inside_roi(bbox, roi, min_overlap=0.1):
