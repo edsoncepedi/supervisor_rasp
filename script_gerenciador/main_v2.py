@@ -743,7 +743,7 @@ def enviar_heartbeat():
 
     try:
         response = requests.post(
-            f"http://{os.getenv('IP_SERVER')}/rfid_heartbeat",
+            f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT')}/rfid_heartbeat",
             json=payload,
             timeout=(1, 2)
         )
