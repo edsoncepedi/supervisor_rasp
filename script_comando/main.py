@@ -29,7 +29,7 @@ GPIO.setup(BOTAO_IMPRESSORA, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 def button_calback(channel):
     print("Botão Pressionado")
     # Defina a URL e os dados a serem enviados na requisição POST
-    url = f"http://{os.getenv('IP_SERVER')}/comando"
+    url = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_SERVER')}/comando"
     payload = {'comando': 'imprime_produto'}
 
     # Cabeçalhos da requisição
