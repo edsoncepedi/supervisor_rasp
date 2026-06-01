@@ -212,8 +212,9 @@ def process_yolo(output_queue, stop_event, start_event):
         #roi_resized = cv2.resize(roi_frame, (MODEL_W, MODEL_H))
 
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        frame_blur = cv2.GaussianBlur(frame_rgb, (3, 3), 0)     
-        input_tensor = np.expand_dims(frame_blur, axis=0)
+        frame_blur = cv2.GaussianBlur(frame_rgb, (3, 3), 0)   
+        frame_final = cv2.flip(frame_blur, -1)  
+        input_tensor = np.expand_dims(frame_final, axis=0)
 
         # Inferência
 
@@ -282,11 +283,11 @@ def process_yolo(output_queue, stop_event, start_event):
                 "mostra": True
             })
             if interface_grafica:
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(frame, f"{fid}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                cv2.rectangle(frame_final, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame_final, f"{fid}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
         if interface_grafica:
-            cv2.rectangle(frame, (ROI["x1"], ROI["y1"]), (ROI["x2"], ROI["y2"]), (255, 255, 0), 2)
+            cv2.rectangle(frame_final, (ROI["x1"], ROI["y1"]), (ROI["x2"], ROI["y2"]), (255, 255, 0), 2)
 
         # Lógica de posto
         if POSTO == 0:
@@ -329,8 +330,8 @@ def process_yolo(output_queue, stop_event, start_event):
                 })
 
                 if interface_grafica:
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                    cv2.putText(frame, detect["label"], (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                    cv2.rectangle(frame_final, (x1, y1), (x2, y2), color, 2)
+                    cv2.putText(frame_final, detect["label"], (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
             # Envia para o processo HTTP
             print(fixed_objects)
             print(" ")
@@ -370,7 +371,7 @@ def process_yolo(output_queue, stop_event, start_event):
 
 
         if interface_grafica:
-            cv2.imshow("Hailo PySDK - DigitalDash", frame)
+            cv2.imshow("Hailo PySDK - DigitalDash", frame_final)
 
             if cv2.waitKey(1) & 0xFF == 27: # ESC
                 break
