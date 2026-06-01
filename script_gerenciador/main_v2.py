@@ -74,10 +74,11 @@ stop_event = threading.Event()
 # --- CONFIGURAÇÕES DO BROKER ---
 BROKER = os.getenv('IP_SERVER')
 PORT = int(os.getenv('PORT_MQTT', 1883))
+PORT_SERVER = int(os.getenv('PORT_SERVER', 8000))
 TOPIC_PRODUCAO = "ControleProducao_DD"
 
 # --- CONFIGURAÇÕES DO FLASK ---
-URL = f"http://{os.getenv('IP_SERVER')}/rfid__checkin_posto"
+URL = f"http://{os.getenv('IP_SERVER')}:{PORT_SERVER}/rfid__checkin_posto"
 POSTO = f"posto_{int(os.getenv('POSTO'))}"
 TOPIC_SISTEMA = f"rastreio_nfc/raspberry/{POSTO}/sistema"
 TOPIC_ENVIO_RASP = f"rastreio_nfc/raspberry/{POSTO}/dispositivo"
