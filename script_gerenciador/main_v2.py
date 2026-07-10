@@ -87,6 +87,7 @@ TOPIC_ENVIO_ESP = f"rastreio_nfc/esp32/{POSTO}/dispositivo"
 TOMADA_POSTO = int(os.getenv('TOMADA_POSTO'))
 BATEDOR_POSTO = int(os.getenv('BATEDOR_POSTO'))
 PEDAL = int(os.getenv('PEDAL'))
+BOTAO_IMPRESSORA = int(os.getenv('BOTAO_IMPRESSORA'))
 SENSOR_PALETE = int(os.getenv('SENSOR_PALETE'))
 SENSOR_CORRENTE = int(os.getenv('SENSOR_CORRENTE'))  # Sensor da parafusadeira (digital)
 
@@ -113,6 +114,7 @@ GPIO.setup(BATEDOR_POSTO, GPIO.OUT)
 GPIO.setup(SENSOR_PALETE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(SENSOR_CORRENTE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 GPIO.setup(PEDAL, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+GPIO.setup(BOTAO_IMPRESSORA, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 rele_tomada_ativo_em = int(os.getenv('RELE_TOMADA_ATIVO_EM', '0'))
 rele_batedor_ativo_em = int(os.getenv('RELE_BATEDOR_ATIVO_EM', '0'))
@@ -600,6 +602,21 @@ def tratar_checkout_pendente():
             checkout_retry_interval = min(checkout_retry_interval * 2.0, CHECKOUT_RETRY_MAX)
             checkout_next_try_ts = agora + checkout_retry_interval
 
+def button_impressora():
+
+    # Defina a URL e os dados a serem enviados na requisição POST
+    url = f"http://{os.getenv('IP_SERVER')}/comando"
+    payload = {'comando': 'imprime_produto'}
+
+    # Cabeçalhos da requisição
+    headers = {'Content-Type': 'application/json'}
+
+    # Envia o POST
+    response = requests.post(url, json=payload, headers=headers)
+
+    # Imprima o código de status e o conteúdo da resposta
+    print(f"Código de Status: {response.status_code}")
+    print(f"Conteúdo da Resposta: {response.text}")
 
 def verifica_sensor_indutivo(pino_sensor, cliente):
     global estado_anterior_palete
@@ -612,19 +629,27 @@ def verifica_sensor_indutivo(pino_sensor, cliente):
         estado_anterior_palete = estado_atual
 
         if estado_atual == GPIO.LOW:
-            print("Chegou palete")
-            cliente.publish(TOPIC_ENVIO_ESP, " 73 84 74 FC")
+            print("Inicia Jogo")
 
 
         else:
-            print("Palete removido")
-            cliente.publish(TOPIC_ENVIO_ESP, "BD")
+            print("Para Jogo")
 
-            if aguardando_saida_palete:
-                aguardando_saida_palete = False
-                print("BD enviado (ciclo concluído)")
-            
 
+def verifica_impressora(pino, cliente):
+    """Detecta acionamento do pedal."""
+    global estado_anterior_pedal
+    global aguardando_saida_palete
+    estado_atual = GPIO.input(pino)
+
+    if estado_atual != estado_anterior_pedal:
+        estado_anterior_pedal = estado_atual
+
+        if estado_atual == GPIO.LOW:
+            print("Inicia Montagem")
+            cliente.publish(TOPIC_ENVIO_ESP, "BS")
+            cliente.publish(TOPIC_ENVIO_ESP, " 73 84 74 FC")
+            button_impressora()
 
 def verifica_pedal(pino_pedal, cliente):
     """Detecta acionamento do pedal."""
@@ -637,6 +662,10 @@ def verifica_pedal(pino_pedal, cliente):
         if estado_atual == GPIO.LOW:
             print("Pedal pressionado")
             cliente.publish(TOPIC_ENVIO_ESP, "BT2")
+            cliente.publish(TOPIC_ENVIO_ESP, "BD")
+            if aguardando_saida_palete:
+                aguardando_saida_palete = False
+                print("BD enviado (ciclo concluído)")
 
 def verificar_palete_preso():
     global aguardando_saida_palete
@@ -806,6 +835,7 @@ try:
         resync_checkout_se_necessario()
         enviar_heartbeat()
 
+        verifica_impressora(BOTAO_IMPRESSORA, client)    # BT1
         verifica_pedal(PEDAL, client)                    # BT2
         verifica_sensor_indutivo(SENSOR_PALETE, client)  # BD
 
