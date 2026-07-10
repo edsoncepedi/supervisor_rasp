@@ -30,6 +30,7 @@ from hailo_postprocess import postprocess_detection_results
 from hailo_postprocess import IDManager
 from assembly_manager import AssemblyManagar
 from assembly_manager import bbox_inside_roi
+from calibracao_aruco import process_calibracao
 
 BROKER = os.getenv('IP_SERVER')
 PORT = int(os.getenv('PORT_MQTT'))
@@ -53,6 +54,7 @@ ZOO_PATH = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv6/dig
 LABELS_FILES = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv6/labels_coco.json"
 CAMERA_ID = 0
 SERVER_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/camera/{POSTO}"
+CALIB_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/calibracao/{POSTO}/homografia"
 SEND_FPS = 20  # Taxa de envio para o servidor
 
 # FPS Camera
@@ -415,6 +417,34 @@ def restart_pipeline():
     start_pipeline()
 
 
+# Camera aberta pelo process_yolo e exclusiva: a calibracao so roda com o
+# pipeline parado, e num processo proprio (nunca no supervisor, que faz fork).
+CALIB_TIMEOUT_S = 40
+
+
+async def run_calibracao():
+    print("🎯 Pausando pipeline para calibrar")
+    estava_rodando = pipeline_running()
+    stop_pipeline(force=True)
+
+    p = multiprocessing.Process(
+        target=process_calibracao,
+        args=(POSTO, CALIB_URL, VIDEO_W_SENSOR, VIDEO_H_SENSOR, PROCESS_FPS),
+        name="calib"
+    )
+    p.start()
+
+    try:
+        await asyncio.to_thread(p.join, CALIB_TIMEOUT_S)
+        if p.is_alive():
+            print("⚠️ Calibração travou. Forçando terminate.")
+            p.terminate()
+            await asyncio.to_thread(p.join, 2.0)
+    finally:
+        if estava_rodando:
+            start_pipeline()
+
+
 async def mqtt_supervisor():
     backoff = 2  # começa tentando a cada 2s
     max_backoff = 30
@@ -443,6 +473,9 @@ async def mqtt_supervisor():
 
                     elif cmd == "restart":
                         restart_pipeline()
+
+                    elif cmd == "calibrate":
+                        await run_calibracao()
                     else:
                         pass
 
