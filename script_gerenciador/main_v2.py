@@ -648,6 +648,7 @@ def verifica_impressora(pino, cliente):
         if estado_atual == GPIO.LOW:
             print("Inicia Montagem")
             cliente.publish(TOPIC_ENVIO_ESP, "BS")
+            time.sleep(0.2)
             cliente.publish(TOPIC_ENVIO_ESP, " 73 84 74 FC")
             button_impressora()
 
@@ -662,6 +663,7 @@ def verifica_pedal(pino_pedal, cliente):
         if estado_atual == GPIO.LOW:
             print("Pedal pressionado")
             cliente.publish(TOPIC_ENVIO_ESP, "BT2")
+            time.sleep(0.2)
             cliente.publish(TOPIC_ENVIO_ESP, "BD")
             if aguardando_saida_palete:
                 aguardando_saida_palete = False
