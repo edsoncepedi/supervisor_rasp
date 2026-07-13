@@ -143,13 +143,14 @@ def _snapshot_falha(posto, vis):
 
 
 def detectar_homografia(picam2, posto, mostrar):
-    """Loop de detecção. Devolve (H, roi), ou (None, None) se estourar o timeout
-    ou o operador abortar com ESC."""
+    """Loop de detecção. Devolve (H, roi, motivo_falha), com motivo_falha None no
+    sucesso. O motivo sobe até o navegador, que sem ele ficaria esperando às cegas."""
     detectar = _get_aruco()
     amostras = []            # cada item: cantos (4,4,2) de um frame com os 4 marcadores
     inicio = time.time()
     ultimo_log = 0.0
     vis = None
+    achados = {}
 
     while True:
         restante = TIMEOUT_S - (time.time() - inicio)
@@ -187,7 +188,7 @@ def detectar_homografia(picam2, posto, mostrar):
             cv2.imshow(JANELA, vis)
             if (cv2.waitKey(1) & 0xFF) == 27:  # ESC
                 print("⏹️ Calibração abortada pelo operador (ESC)")
-                return None, None
+                return None, None, "abortada no Pi (ESC)"
 
         agora = time.time()
         if agora - ultimo_log > INTERVALO_LOG_S:
@@ -210,10 +211,13 @@ def detectar_homografia(picam2, posto, mostrar):
                 cv2.imshow(JANELA, vis)
                 cv2.waitKey(HOLD_OK_MS)
 
-            return H, roi
+            return H, roi, None
 
-    print(f"❌ Timeout: não achei os 4 marcadores em {TIMEOUT_S:.0f}s. "
-          f"O projetor está exibindo a tela de calibração?")
+    # O motivo diz QUANTOS marcadores apareceram: "0/4" é projetor apagado ou fora
+    # do campo de visão; "3/4" é um canto cortado ou reflexo. São problemas diferentes.
+    motivo = (f"timeout em {TIMEOUT_S:.0f}s, vi {len(achados)}/4 marcadores "
+              f"(ids {sorted(achados) if achados else 'nenhum'})")
+    print(f"❌ {motivo}. O projetor está exibindo a tela de calibração?")
 
     if vis is not None:
         _hud(vis, ["TIMEOUT: nao achei os 4 marcadores"], cor=(0, 0, 255))
@@ -222,41 +226,75 @@ def detectar_homografia(picam2, posto, mostrar):
             cv2.imshow(JANELA, vis)
             cv2.waitKey(HOLD_ERRO_MS)
 
-    return None, None
+    return None, None, motivo
+
+
+TENTATIVAS_CAMERA = 4
+ESPERA_CAMERA_S = 1.5
 
 
 def _abrir_camera(cam_w, cam_h, fps):
     """Mesma configuração do process_yolo. Se divergir, H fica calibrada para um
-    espaço de entrada em que os retângulos do YOLO não vivem."""
+    espaço de entrada em que os retângulos do YOLO não vivem.
+
+    Tenta algumas vezes: o process_yolo acabou de ser parado e, se ele levou um
+    terminate() no meio de uma inferência, não chegou a fechar a câmera. Ela leva
+    um instante para ser liberada e a primeira tentativa aqui pega "device busy".
+    """
     # Import local: a Picamera2 só pode ser instanciada dentro do processo filho,
     # nunca no supervisor que faz fork.
     from picamera2 import Picamera2
 
-    picam2 = Picamera2()
-    picam2.configure(picam2.create_video_configuration(
-        main={"size": (cam_w, cam_h), "format": "RGB888"},
-        controls={"FrameRate": fps},
-    ))
-    picam2.start()
-    time.sleep(0.5)  # deixa o AE/AWB assentar antes do primeiro frame
-    return picam2
+    for tentativa in range(1, TENTATIVAS_CAMERA + 1):
+        try:
+            picam2 = Picamera2()
+            picam2.configure(picam2.create_video_configuration(
+                main={"size": (cam_w, cam_h), "format": "RGB888"},
+                controls={"FrameRate": fps},
+            ))
+            picam2.start()
+            time.sleep(0.5)  # deixa o AE/AWB assentar antes do primeiro frame
+            return picam2
+
+        except Exception as e:
+            print(f"⏳ Câmera ocupada ({tentativa}/{TENTATIVAS_CAMERA}): {e}")
+            if tentativa == TENTATIVAS_CAMERA:
+                raise
+            time.sleep(ESPERA_CAMERA_S)
 
 
-def process_calibracao(posto, url_homografia, cam_w, cam_h, fps):
+def _avisar_falha(url_falha, motivo):
+    """O navegador está esperando: ou avisamos, ou ele fica preso na tela de
+    marcadores até a própria janela dele expirar."""
+    try:
+        requests.post(url_falha, json={"motivo": motivo[:200]}, timeout=5)
+        print(f"📨 Falha reportada ao servidor: {motivo}")
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ Não consegui reportar a falha: {e}")
+
+
+def process_calibracao(posto, url_base, cam_w, cam_h, fps):
     """Entry point do processo filho. Nunca levanta: o pai precisa religar o
-    pipeline aconteça o que acontecer."""
+    pipeline aconteça o que acontecer.
+
+    url_base é .../api/calibracao/{posto}; daqui saem o POST do resultado e o da falha.
+    """
     mostrar = _interface_grafica()
     if not mostrar:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+    url_homografia = f"{url_base}/homografia"
+    url_falha = f"{url_base}/falha"
 
     print(f"🎯 Calibração ArUco do posto {posto} iniciada")
     picam2 = None
 
     try:
         picam2 = _abrir_camera(cam_w, cam_h, fps)
-        H, roi = detectar_homografia(picam2, posto, mostrar)
+        H, roi, motivo = detectar_homografia(picam2, posto, mostrar)
 
         if H is None:
+            _avisar_falha(url_falha, motivo or "falha desconhecida")
             return
 
         payload = {"H": H.tolist(), "ref_w": REF_W, "ref_h": REF_H, "roi": roi}
@@ -268,9 +306,11 @@ def process_calibracao(posto, url_homografia, cam_w, cam_h, fps):
 
     except requests.exceptions.RequestException as e:
         print(f"❌ Falha ao enviar homografia: {e}")
+        _avisar_falha(url_falha, f"erro de rede ao enviar a homografia: {e}")
 
     except Exception as e:
         print(f"❌ Erro na calibração: {e}")
+        _avisar_falha(url_falha, f"erro no Pi: {e}")
 
     finally:
         if picam2 is not None:

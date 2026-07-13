@@ -54,7 +54,8 @@ ZOO_PATH = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv6/dig
 LABELS_FILES = "/home/cepedi/supervisor_rasp/script_camera/modelos/digitaldashv6/labels_coco.json"
 CAMERA_ID = 0
 SERVER_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/camera/{POSTO}"
-CALIB_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/calibracao/{POSTO}/homografia"
+# Base: a calibração pendura /homografia (sucesso) e /falha (desistiu) em cima.
+CALIB_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/calibracao/{POSTO}"
 SEND_FPS = 20  # Taxa de envio para o servidor
 
 # FPS Camera
@@ -467,7 +468,14 @@ async def run_calibracao():
         # A calibração gravou o ROI novo no servidor; relemos antes do fork para
         # que o pipeline volte já com ele. Se a calibração falhou, o servidor
         # devolve o ROI antigo e nada muda.
-        await asyncio.to_thread(carregar_config, False)
+        #
+        # Blindado de propósito: qualquer erro aqui NÃO pode impedir o religamento.
+        # Voltar sem o ROI novo é ruim; voltar sem pipeline nenhum é o posto parado.
+        try:
+            await asyncio.to_thread(carregar_config, False)
+        except Exception as e:
+            print(f"⚠️ Erro ao reler a config, seguindo com a atual: {e}")
+
         if estava_rodando:
             start_pipeline()
 
