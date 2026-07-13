@@ -98,7 +98,11 @@ tempo_batedor = 0
 
 estado_anterior_parafusadeira = GPIO.HIGH
 estado_anterior_palete = GPIO.HIGH
+# Um "estado anterior" por pino: se dois pinos compartilham a variável, cada
+# leitura sobrescreve a borda do outro e ambos passam a disparar a cada volta
+# do laço enquanto seguem pressionados.
 estado_anterior_pedal = GPIO.HIGH
+estado_anterior_impressora = GPIO.HIGH
 
 ultimo_id = None
 ultimo_id_lido = None
@@ -637,13 +641,13 @@ def verifica_sensor_indutivo(pino_sensor, cliente):
 
 
 def verifica_impressora(pino, cliente):
-    """Detecta acionamento do pedal."""
-    global estado_anterior_pedal
+    """Detecta acionamento do botão da impressora."""
+    global estado_anterior_impressora
     global aguardando_saida_palete
     estado_atual = GPIO.input(pino)
 
-    if estado_atual != estado_anterior_pedal:
-        estado_anterior_pedal = estado_atual
+    if estado_atual != estado_anterior_impressora:
+        estado_anterior_impressora = estado_atual
 
         if estado_atual == GPIO.LOW:
             print("Inicia Montagem")
