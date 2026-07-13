@@ -68,36 +68,59 @@ VIDEO_H_SENSOR = 640
 MODEL_W = 640
 MODEL_H = 640
 
-# ROI: x, y, largura, altura
-while True:
-    try:
-        URL_CONFIG = f"http://172.16.10.175:5000/api/config/{POSTO}"
+# ROI: x, y, largura, altura, em pixel da câmera (é onde vivem as bboxes do YOLO,
+# que ele filtra). Fonte de verdade: o config do posto no servidor. A calibração
+# ArUco recalcula o ROI a partir dos marcadores e grava lá, então aqui basta reler.
+CONFIG_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/config/{POSTO}"
 
-        response = requests.get(URL_CONFIG, timeout=5)
-        response.raise_for_status()
-        data = response.json()
+ROI = {"x1": 35, "y1": 211, "x2": 35 + 535, "y2": 211 + 300}
+CONFIDENCE_THRESHOLD = 0.3
 
-        ROI_X = data.get("ROI_X", 35)
-        ROI_Y = data.get("ROI_Y", 211)
-        ROI_W = data.get("ROI_W", 535)
-        ROI_H = data.get("ROI_H", 300)
-        CONFIDENCE_THRESHOLD = data.get("CONFIDENCE_THRESHOLD", 0.3)
-        print(f"Configurações recebidas do servidor: ROI=({ROI_X}, {ROI_Y}, {ROI_W}, {ROI_H}), CONFIDENCE_THRESHOLD={CONFIDENCE_THRESHOLD}")
-        print("Config recebida com sucesso!")
-        break  # <- sai do loop quando der certo
 
-    except requests.exceptions.RequestException as e:
-        print("Erro ao buscar config no servidor:", e)
-        print("Tentando novamente em 3 segundos...")
-        time.sleep(3)
+def carregar_config(bloqueante=True):
+    """Puxa ROI e threshold do servidor para as globais que o process_yolo lê.
 
-ROI = {
-    "x1": ROI_X,
-    "y1": ROI_Y,
-    "x2": ROI_X + ROI_W,
-    "y2": ROI_Y + ROI_H
-}
-print(ROI)
+    O fork copia as globais do pai, então chamar isto ANTES do start_pipeline é o
+    que faz o pipeline novo enxergar o ROI recém-calibrado.
+
+    Com bloqueante=False tenta uma vez só e mantém a config atual se falhar: depois
+    da calibração não dá para travar o religamento do pipeline por causa da rede.
+    """
+    global ROI, CONFIDENCE_THRESHOLD
+
+    while True:
+        try:
+            response = requests.get(CONFIG_URL, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+
+            roi_x = data.get("ROI_X", 35)
+            roi_y = data.get("ROI_Y", 211)
+            roi_w = data.get("ROI_W", 535)
+            roi_h = data.get("ROI_H", 300)
+
+            ROI = {
+                "x1": roi_x,
+                "y1": roi_y,
+                "x2": roi_x + roi_w,
+                "y2": roi_y + roi_h,
+            }
+            CONFIDENCE_THRESHOLD = data.get("CONFIDENCE_THRESHOLD", 0.3)
+
+            print(f"✅ Config do posto {POSTO}: ROI={ROI} "
+                  f"CONFIDENCE_THRESHOLD={CONFIDENCE_THRESHOLD}")
+            return True
+
+        except requests.exceptions.RequestException as e:
+            print("Erro ao buscar config no servidor:", e)
+            if not bloqueante:
+                print(f"↩️ Mantendo config atual: ROI={ROI}")
+                return False
+            print("Tentando novamente em 3 segundos...")
+            time.sleep(3)
+
+
+carregar_config()
 
 def clean_data(obj):
     if isinstance(obj, float):
@@ -441,6 +464,10 @@ async def run_calibracao():
             p.terminate()
             await asyncio.to_thread(p.join, 2.0)
     finally:
+        # A calibração gravou o ROI novo no servidor; relemos antes do fork para
+        # que o pipeline volte já com ele. Se a calibração falhou, o servidor
+        # devolve o ROI antigo e nada muda.
+        await asyncio.to_thread(carregar_config, False)
         if estava_rodando:
             start_pipeline()
 
