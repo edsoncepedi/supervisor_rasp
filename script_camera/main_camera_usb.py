@@ -32,12 +32,9 @@ from assembly_manager import AssemblyManagar
 from assembly_manager import bbox_inside_roi
 
 #BROKER MQTT
-#BROKER = "172.16.10.175"
 BROKER = os.getenv('IP_SERVER')
 PORT = int(os.getenv('PORT_MQTT'))
 POSTO = int(os.getenv("POSTO"))
-
-#PORT = 1883
 
 CMD_TOPIC = f"sistema/camera/posto_{POSTO}"
 
@@ -70,7 +67,7 @@ MODEL_H = 640
 # ROI: x, y, largura, altura
 while True:
     try:
-        URL_CONFIG = f"http://172.16.10.175:5000/api/config/{POSTO}"
+        URL_CONFIG = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/config/{POSTO}"
 
         response = requests.get(URL_CONFIG, timeout=5)
         response.raise_for_status()

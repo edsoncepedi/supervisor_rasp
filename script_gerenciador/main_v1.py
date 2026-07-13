@@ -1,13 +1,18 @@
 import RPi.GPIO as GPIO
 from mfrc522 import SimpleMFRC522
 import time
+import os
+from dotenv import load_dotenv
 
-GPIO.setmode(GPIO.BCM) 
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(dotenv_path=dotenv_path)
+
+GPIO.setmode(GPIO.BCM)
 
 # --- CONFIGURAÇÕES DO BROKER ---
-BROKER = "172.16.10.175"   
-PORT = 1883                     
-TOPIC = "ControleProducao_DD"          
+BROKER = os.getenv('IP_SERVER')
+PORT = int(os.getenv('PORT_MQTT', 1883))
+TOPIC = "ControleProducao_DD"
 
 # --- Definição dos Pinos ---a
 TOMADA_POSTO = 17 

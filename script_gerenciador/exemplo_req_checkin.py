@@ -1,7 +1,12 @@
 import requests
+import os
+from dotenv import load_dotenv
+
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(dotenv_path=dotenv_path)
 
 # URL do endpoint Flask
-url = "http://172.16.10.175:7000/rfid__checkin_posto"  # altere IP/porta conforme seu Flask
+url = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_SERVER')}/rfid__checkin_posto"
 
 # Tag RFID (simulada aqui, mas poderia vir de um leitor)
 tag = "584197450694"
