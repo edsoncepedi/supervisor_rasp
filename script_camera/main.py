@@ -30,6 +30,7 @@ from hailo_postprocess import postprocess_detection_results
 from hailo_postprocess import IDManager
 from assembly_manager import AssemblyManagar
 from assembly_manager import bbox_inside_roi
+from calibracao_aruco import process_calibracao
 
 BROKER = os.getenv('IP_SERVER')
 PORT = int(os.getenv('PORT_MQTT'))
@@ -66,35 +67,61 @@ VIDEO_H_SENSOR = 640
 MODEL_W = 640
 MODEL_H = 640
 
-# ROI: x, y, largura, altura
-while True:
-    try:
-        URL_CONFIG = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/config/{POSTO}"
+# ROI: x, y, largura, altura, em pixel da câmera (é onde vivem as bboxes do
+# YOLO, que ele filtra). Fonte de verdade: o config do posto no servidor. A
+# calibração ArUco recalcula o ROI a partir dos marcadores e grava lá, então
+# aqui basta reler.
+URL_CONFIG = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/config/{POSTO}"
+# Base: a calibração pendura /homografia (sucesso) e /falha (desistiu) em cima.
+CALIB_URL = f"http://{os.getenv('IP_SERVER')}:{os.getenv('PORT_FRONTEND')}/api/calibracao/{POSTO}"
 
-        response = requests.get(URL_CONFIG, timeout=5)
-        response.raise_for_status()
-        data = response.json()
+ROI = {"x1": 35, "y1": 211, "x2": 35 + 535, "y2": 211 + 300}
+CONFIDENCE_THRESHOLD = 0.3
 
-        ROI_X = data.get("ROI_X", 35)
-        ROI_Y = data.get("ROI_Y", 211)
-        ROI_W = data.get("ROI_W", 535)
-        ROI_H = data.get("ROI_H", 300)
-        CONFIDENCE_THRESHOLD = data.get("CONFIDENCE_THRESHOLD", 0.3)
-        print(f"Configurações recebidas do servidor: ROI=({ROI_X}, {ROI_Y}, {ROI_W}, {ROI_H}), CONFIDENCE_THRESHOLD={CONFIDENCE_THRESHOLD}")
-        print("Config recebida com sucesso!")
-        break  # <- sai do loop quando der certo
 
-    except requests.exceptions.RequestException as e:
-        print("Erro ao buscar config no servidor:", e)
-        print("Tentando novamente em 3 segundos...")
-        time.sleep(3)
+def carregar_config(bloqueante=True):
+    """Puxa ROI e threshold do servidor para as globais que o process_yolo lê.
 
-ROI = {
-    "x1": ROI_X,
-    "y1": ROI_Y,
-    "x2": ROI_X + ROI_W,
-    "y2": ROI_Y + ROI_H
-}
+    O fork copia as globais do pai, então chamar isto ANTES do start_pipeline
+    é o que faz o pipeline novo enxergar o ROI recém-calibrado.
+
+    Com bloqueante=False tenta uma vez só e mantém a config atual se falhar:
+    depois da calibração não dá para travar o religamento do pipeline por
+    causa da rede.
+    """
+    global ROI, CONFIDENCE_THRESHOLD
+
+    while True:
+        try:
+            response = requests.get(URL_CONFIG, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+
+            roi_x = data.get("ROI_X", 35)
+            roi_y = data.get("ROI_Y", 211)
+            roi_w = data.get("ROI_W", 535)
+            roi_h = data.get("ROI_H", 300)
+            CONFIDENCE_THRESHOLD = data.get("CONFIDENCE_THRESHOLD", 0.3)
+
+            ROI = {
+                "x1": roi_x,
+                "y1": roi_y,
+                "x2": roi_x + roi_w,
+                "y2": roi_y + roi_h,
+            }
+            print(f"Configurações recebidas do servidor: ROI={ROI}, CONFIDENCE_THRESHOLD={CONFIDENCE_THRESHOLD}")
+            print("Config recebida com sucesso!")
+            return
+
+        except requests.exceptions.RequestException as e:
+            print("Erro ao buscar config no servidor:", e)
+            if not bloqueante:
+                return
+            print("Tentando novamente em 3 segundos...")
+            time.sleep(3)
+
+
+carregar_config(bloqueante=True)
 print(ROI)
 
 def clean_data(obj):
@@ -469,6 +496,46 @@ def restart_pipeline():
     start_pipeline()
 
 
+# Camera aberta pelo process_yolo e exclusiva: a calibracao so roda com o
+# pipeline parado, e num processo proprio (nunca no supervisor, que faz fork).
+CALIB_TIMEOUT_S = 40
+
+
+async def run_calibracao():
+    print("🎯 Pausando pipeline para calibrar")
+    estava_rodando = pipeline_running()
+    stop_pipeline(force=True)
+
+    p = multiprocessing.Process(
+        target=process_calibracao,
+        args=(POSTO, CALIB_URL, VIDEO_W_SENSOR, VIDEO_H_SENSOR, PROCESS_FPS),
+        name="calib"
+    )
+    p.start()
+
+    try:
+        await asyncio.to_thread(p.join, CALIB_TIMEOUT_S)
+        if p.is_alive():
+            print("⚠️ Calibração travou. Forçando terminate.")
+            p.terminate()
+            await asyncio.to_thread(p.join, 2.0)
+    finally:
+        # A calibração gravou o ROI novo no servidor; relemos antes do fork
+        # para que o pipeline volte já com ele. Se a calibração falhou, o
+        # servidor devolve o ROI antigo e nada muda.
+        #
+        # Blindado de propósito: qualquer erro aqui NÃO pode impedir o
+        # religamento. Voltar sem o ROI novo é ruim; voltar sem pipeline
+        # nenhum é o posto parado.
+        try:
+            await asyncio.to_thread(carregar_config, False)
+        except Exception as e:
+            print(f"⚠️ Erro ao reler a config, seguindo com a atual: {e}")
+
+        if estava_rodando:
+            start_pipeline()
+
+
 async def mqtt_supervisor():
     backoff = 2  # começa tentando a cada 2s
     max_backoff = 30
@@ -497,6 +564,9 @@ async def mqtt_supervisor():
 
                     elif cmd == "restart":
                         restart_pipeline()
+
+                    elif cmd == "calibrate":
+                        await run_calibracao()
                     else:
                         pass
 
